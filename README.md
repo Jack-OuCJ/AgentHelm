@@ -4,14 +4,14 @@
 
 基于 [blankhoney/agentlord](https://github.com/blankhoney/agentlord) 的 `main` 分支快照 `8c96addde0a35230bed7ff9db45affd1c31bf051` 创建。本分支包含工作区范围适配，不应直接照搬上游的全局部署教程。
 
-配置范围限定在 `/Users/jack/Projects/AgentHelm`。全局 AGENTS.md、CLAUDE.md、skills、Claude/Codex 设置、账号、代理和 Herdr 钩子均不由本项目管理。项目会话仍会读取用户级规则及可发现的 skills；本适配实现配置分域，不提供操作系统级安全隔离。
+配置范围限定在当前 checkout，根目录由工具自身位置识别。全局 AGENTS.md、CLAUDE.md、skills、Claude/Codex 设置、账号、代理和 Herdr 钩子均不由本项目管理。项目会话仍会读取用户级规则及可发现的 skills；本适配实现配置分域，不提供操作系统级安全隔离。
 
 ## 开始使用
 
-首次使用先初始化当前 checkout，再进入 Herdr：
+首次使用从父目录进入 checkout（目录名按实际位置调整），初始化后进入 Herdr：
 
 ```sh
-cd /Users/jack/Projects/AgentHelm
+cd AgentHelm
 python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-herdr
 herdr
 ```
@@ -27,7 +27,7 @@ Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动�
 向主会话描述任务即可。需要独立 Lead 时，先准备 `templates/task-card.md` 格式的任务卡，再运行：
 
 ```sh
-./bin/new-task my-task < /path/to/card.md
+./bin/new-task my-task < cards/my-task.md
 ```
 
 任务目录会编号为 `experiments/001-my-task/`，Herdr 在该目录创建独立 Lead 会话。该命令会真正启动模型，需在任务授权范围内使用；安装自检使用替身，不调用模型。
@@ -63,13 +63,29 @@ Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动�
 
 ## 领域 skills 路由
 
-本仓库不预装领域 skills。`bin/build-routers` 根据手写 TOML 分组和每个 skill 的 metadata 生成目录与指向 SKILL.md 的索引；不会自行训练路由模型或替你决定分类。
+本仓库不预装领域 skills。使用 `research-setup` 初始化或安装领域技能时，先确认三个独立选择：安装范围（跳过、指定技能、全库）、注册方式（领域路由、逐技能注册、仅入库）、注册目标（Claude、Codex、两者）。选择领域路由还需确定用户分类或自动按用途分组。已有明确选择会复用；“全部安装”只确定范围，不代表选择逐技能注册。
+
+先看目录，再预览和安装选中的技能：
+
+```sh
+./bin/install-component skills-library --list
+./bin/install-component skills-library --skill scientific-writing --agent both --dry-run
+./bin/install-component skills-library --skill scientific-writing --agent both
+```
+
+默认从 [K-Dense Scientific Agent Skills](https://github.com/K-Dense-AI/scientific-agent-skills) 下载。输出包含实际来源提交；`--ref <提交/标签/分支>` 可固定版本。明确安装全库使用 `--all`；不带选择参数只列目录。离线库使用 `--source <本地目录>`，需包含 SKILL.md 和根 LICENSE 文件。
+
+技能文件及附属资源复制到本工作区 `skills-library/<名称>/`，许可证和 `CATALOG.md` 一并保留。安装时必须显式选择 `--agent`：`codex` 在项目 `.agents/skills/` 注册逐技能链接，`claude` 在项目 `.claude/skills/` 注册，`both` 注册两处，`none` 仅入库。源版本和文件哈希记录在 `.agenthelm/state/skills-library.json`；下载临时目录也位于该工作区，退出后清理。安装不执行技能代码、不安装依赖、不启动 agent，也不修改 HOME 中的配置或技能。
+
+再次选择同一技能可更新其来源内容；本地修改、未受管理的同名目录或已有注册冲突会在写入技能前报错。未选中的已安装技能保留。CLI 没有刷新发现列表时，在本工作区新开会话验证。
+
+需要领域路由时，安装选 `--agent none` 仅入库，然后完成分组、生成和注册。已经安装的技能直接复用。`bin/build-routers` 根据配置中的用途分组和每个 skill 的 metadata 生成路由与 SKILL.md 索引；分组由用户指定或明确授权 Agent 按用途整理。
 
 示例存为 `.agenthelm/config/routers.toml`：
 
 ```toml
 library = "../../skills-library"
-output = "../../skills"
+output = "../../.agenthelm/routers"
 prefix = "route-"
 [routers.example]
 title = "示例任务"
@@ -77,7 +93,16 @@ description = "在处理对应领域任务时使用。"
 skills = ["example-skill"]
 ```
 
-库中的每个 skill 必须恰好归一个路由。library/output 必须在工作区；生成后在项目 `.agents/skills` 和 `.claude/skills` 注册需要的路由。已有手写 skill 不会被同名生成覆盖。
+库中的每个 skill 必须恰好归一个路由，library/output 必须在工作区。预览并向两个项目 CLI 注册路由：
+
+```sh
+./bin/build-routers --agent both --dry-run
+./bin/build-routers --agent both
+```
+
+生成的路由和目录使用文档相对链接：路由中的路径相对于该 SKILL.md 的真实所在目录（先解析项目入口符号链接），目录中的路径相对于 CATALOG.md；与终端启动目录无关。项目注册链接也为相对链接，整体移动工作区后无需重新生成这些引用。
+
+从逐技能注册切换为路由时，两个命令都增加 `--replace-leaf-links`。它先检查全部输出和入口冲突，只移除安装清单管理且精确指向本工作区技能库的逐技能链接，保留技能文件和其他项目入口。`--agent none` 本身不移除旧链接。已有手写 skill 不会被同名生成覆盖。重新生成时会清理已退役的生成路由及其对应项目链接。
 
 ## 自检与维护
 
@@ -91,12 +116,14 @@ python3 skills/research-setup/scripts/smoke.py
 重复部署：
 
 ```sh
-python3 skills/research-setup/scripts/deploy /Users/jack/Projects/AgentHelm --role dispatcher --env cli-herdr
+python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-herdr
 ```
 
 工作区配置和任务内容被 Git 忽略。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
 
-全局组件安装、私有规则覆盖、自动 push/cron 已禁用。任务看板需在本机单独配置；未配置时只维护本地状态。合并上游更新时应逐项检查是否重新引入全局行为，不能直接重置或强制覆盖本地适配。
+整体移动 checkout 后，脚本通过自身位置、项目 SessionStart 钩子通过会话项目目录识别新根目录，配置与技能链接保留相对关系。`.agenthelm/config/install-dir` 相对于该配置文件所在目录。委派提示中的绝对路径在运行时重新计算，不固化到入口配置。全局配置基线和历史恢复快照属于原始证据，保留其中的历史路径；第三方技能中的容器、系统工具路径按各自平台语义使用。
+
+全局组件安装、私有规则覆盖、自动 push/cron 已禁用；领域 skills 可按上述流程安装到本工作区。任务看板需在本机单独配置；未配置时只维护本地状态。合并上游更新时应逐项检查是否重新引入全局行为，不能直接重置或强制覆盖本地适配。
 
 ## 飞书任务观测
 
@@ -114,8 +141,8 @@ python3 skills/research-setup/scripts/deploy /Users/jack/Projects/AgentHelm --ro
 在任务目录报告进展：
 
 ```sh
-/Users/jack/Projects/AgentHelm/bin/status running "正在验证"
-/Users/jack/Projects/AgentHelm/bin/status done "验证完成"
+../../bin/status running "正在验证"
+../../bin/status done "验证完成"
 ```
 
 从工作区根目录补同步全部任务：

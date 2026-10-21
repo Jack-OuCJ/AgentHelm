@@ -30,7 +30,7 @@ class WorkspaceTests(unittest.TestCase):
         self.base = Path(self.temp.name).resolve()
         self.root = self.base / 'workspace'
         shutil.copytree(SOURCE, self.root, ignore=shutil.ignore_patterns(
-            '.git', '.agenthelm', '.agents', '.claude', '__pycache__', 'experiments',
+            '.git', '.agenthelm', '.agents', '.claude', 'skills-library', '__pycache__', 'experiments',
             'cards', 'reports', 'rules', 'INDEX.md', 'BOARD.md', 'EXPERIMENTS.md', 'rules-extra.md'))
         self.home = self.base / 'home'
         (self.home / '.agents/skills/existing').mkdir(parents=True)
@@ -152,7 +152,7 @@ class WorkspaceTests(unittest.TestCase):
         configure()
         self.run_cmd('bin/build-routers')
         router = self.root / 'skills/route-demo/SKILL.md'
-        self.assertIn(str(library / 'demo/SKILL.md'), router.read_text())
+        self.assertIn('../../skills-library/demo/SKILL.md', router.read_text())
         self.run_cmd('bin/build-routers')
         configure(skills='[]')
         self.assertIn('missing=', self.run_cmd('bin/build-routers', ok=False).stderr)

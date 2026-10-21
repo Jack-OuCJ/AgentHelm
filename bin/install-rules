@@ -5,7 +5,7 @@ import subprocess
 
 for directory in ('experiments', 'cards', 'reports', 'rules'):
     owned(ROOT / directory).mkdir(exist_ok=True)
-write(CONFIG / 'install-dir', str(ROOT) + '\n')
+write(CONFIG / 'install-dir', '../..\n')
 for source, destination in (('research-AGENTS.md', 'rules/research-workflow.md'),
                             ('research-extra.md', 'rules-extra.md')):
     write(ROOT / destination, (ROOT / 'templates' / source).read_text())

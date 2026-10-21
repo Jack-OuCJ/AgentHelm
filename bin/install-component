@@ -1,13 +1,37 @@
 #!/usr/bin/env python3
-"""Inspect an existing component; workspace mode does not install global plugins."""
+"""Install selected domain skills in this checkout; reuse existing tools."""
 import argparse
 import shutil
+from _skills import install
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('component', choices=('herdr', 'ponytail', 'caveman', 'claude-hud', 'skills-library'))
-parser.add_argument('--agent', choices=('claude', 'codex', 'both'), default='both')
+parser.add_argument('--agent', choices=('claude', 'codex', 'both', 'none'),
+                    help='必须明确选择项目注册目标；none 仅入库，可后续生成领域路由')
 parser.add_argument('--dry-run', action='store_true')
+parser.add_argument('--list', action='store_true', help='列出领域技能目录，不安装')
+selection = parser.add_mutually_exclusive_group()
+selection.add_argument('--skill', action='append', default=[], help='安装指定技能，可重复')
+selection.add_argument('--all', action='store_true', help='明确选择整个技能库')
+parser.add_argument('--source', help='读取本地技能库目录；默认从官方仓库下载')
+parser.add_argument('--ref', help='官方仓库的 Git 分支、标签或提交')
 args = parser.parse_args()
-if args.component == 'herdr' and shutil.which('herdr'):
+if args.component == 'skills-library':
+    if (args.skill or args.all) and args.agent is None:
+        parser.error('先选择注册方式：逐技能注册用 --agent claude|codex|both；领域路由或仅入库用 --agent none')
+    if args.list and (args.skill or args.all):
+        parser.error('--list cannot be combined with a selection')
+    if args.source and args.ref:
+        parser.error('--ref is only supported for the official remote source')
+    if args.ref and args.ref.startswith('-'):
+        parser.error('--ref must be a Git branch, tag or commit')
+    try:
+        install(args)
+    except (ValueError, OSError) as error:
+        parser.exit(1, 'skills-library: ' + str(error) + '\n')
+elif args.list or args.skill or args.all or args.source or args.ref:
+    parser.error('domain skill options require skills-library')
+elif args.component == 'herdr' and shutil.which('herdr'):
     print('herdr: reusing ' + shutil.which('herdr'))
 else:
     parser.error('automatic component installation is disabled; request a specific project-local installation separately')
