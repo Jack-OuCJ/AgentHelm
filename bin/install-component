@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Install one selected component; use --agent claude|codex|both for skills."""
+import argparse
+import json
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import tempfile
+import urllib.request
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('component', choices=('herdr', 'ponytail', 'caveman', 'claude-hud', 'skills-library'))
+parser.add_argument('--agent', choices=('claude', 'codex', 'both'), default='both')
+parser.add_argument('--dry-run', action='store_true')
+args = parser.parse_args()
+root = Path(__file__).resolve().parent.parent
+home = Path.home()
+
+
+def run(*command):
+    subprocess.run(command, check=True)
+
+
+def plugin(repository, name):
+    installed = json.loads(subprocess.check_output(['claude', 'plugin', 'list', '--json'], text=True))
+    if any(item['id'] == f'{name}@{name}' for item in installed):
+        print(f'{name}: Claude plugin already installed; skipped')
+        return
+    marketplaces = json.loads(subprocess.check_output(['claude', 'plugin', 'marketplace', 'list', '--json'], text=True))
+    if not any(item['name'] == name for item in marketplaces):
+        run('claude', 'plugin', 'marketplace', 'add', repository)
+    run('claude', 'plugin', 'install', f'{name}@{name}')
+
+
+def description(path):
+    raw = path.read_text()
+    front = raw.split('---', 2)[1]
+    match = re.search(r'(?m)^description:\s*(.*)', front)
+    if not match:
+        return '(no description)'
+    value = match[1].strip()
+    if value in ('>', '|', '>-', '|-'):
+        rest = front[match.end():].splitlines()
+        value = ' '.join(line.strip() for line in rest if line.startswith((' ', '\t')))
+    return re.split(r'(?<=[.!?])\s+', value.strip('\"\''), maxsplit=1)[0].replace('|', '\\|')
+
+
+if args.component == 'herdr':
+    system = {'Linux': 'linux', 'Darwin': 'macos'}[platform.system()]
+    arch = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}[platform.machine().lower()]
+    url = f'https://github.com/herdrdev/herdr/releases/latest/download/herdr-{system}-{arch}'
+    target = home / '.local/bin/herdr'
+    if args.dry_run:
+        print(f'URL: {url}\nTarget: {target}')
+    elif target.exists():
+        print('herdr: already installed; skipped')
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='research-component-') as directory:
+            download = Path(directory) / 'herdr'
+            urllib.request.urlretrieve(url, download)
+            shutil.copyfile(download, target)
+            target.chmod(0o755)
+        print('herdr: installed')
+    raise SystemExit(0)
+if args.dry_run:
+    parser.error('--dry-run is supported for herdr only')
+repositories = {'ponytail': 'DietrichGebert/ponytail', 'caveman': 'JuliusBrussee/caveman',
+                'claude-hud': 'jarrodwatts/claude-hud', 'skills-library': 'K-Dense-AI/scientific-agent-skills'}
+repository = repositories[args.component]
+if args.component == 'claude-hud':
+    if args.agent == 'codex':
+        raise SystemExit('claude-hud requires Claude Code')
+    plugin(repository, args.component)
+    print('In Claude Code run /reload-plugins and /claude-hud:setup to activate the HUD.')
+    raise SystemExit(0)
+if args.component != 'skills-library' and args.agent in ('claude', 'both'):
+    plugin(repository, args.component)
+if args.component != 'skills-library' and args.agent == 'claude':
+    raise SystemExit(0)
+with tempfile.TemporaryDirectory(prefix='research-component-') as directory:
+    source = Path(directory) / 'source'
+    target = root / 'skills-library' if args.component == 'skills-library' else home / '.codex/skills' / args.component
+    print(f'{args.component}: {"updating" if target.exists() else "installing"}')
+    run('git', 'clone', '--depth', '1', 'https://github.com/' + repository + '.git', str(source))
+    skills = sorted(source.rglob('SKILL.md'))
+    if args.component == 'skills-library':
+        names = [path.parent.name for path in skills]
+        if len(names) != len(set(names)):
+            raise SystemExit('Duplicate skill directory names; resolve upstream layout before installing.')
+        target.mkdir(parents=True, exist_ok=True)
+        rows = ['# Skills catalog', '', 'Skill | Description', '--- | ---']
+        for skill in skills:
+            destination = target / skill.parent.name
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(skill.parent, destination)
+            rows.append(f'{skill.parent.name} | {description(skill)}')
+        (target / 'CATALOG.md').write_text('\n'.join(rows) + '\n')
+        shutil.copy2(next(source.glob('LICENSE*')), target / 'LICENSE')
+    else:
+        candidates = [path for path in skills if path.parent.name == args.component]
+        candidates = [path for path in candidates if path.relative_to(source).as_posix() == f'skills/{args.component}/SKILL.md'] or candidates
+        if len(candidates) != 1:
+            raise SystemExit('Expected one matching skill directory in upstream repository.')
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(candidates[0].parent, target)
+print(f'{args.component}: ok')

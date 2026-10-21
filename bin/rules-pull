@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+[ -s "$HOME/.config/research/rules-remote" ] || exit 0
+bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+gitdir=$("$bin/rgit" rev-parse --absolute-git-dir 2>/dev/null) || {
+    echo 'rules-pull: failed to read checkout; using local rules'
+    exit 0
+}
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+    echo 'rules-pull: skipped; manual rebase in progress'
+    exit 0
+fi
+if [ -n "$("$bin/rgit" diff --name-only --diff-filter=U)" ]; then
+    echo 'rules-pull: failed; unresolved conflicts; using local rules'
+    exit 0
+fi
+if ! "$bin/rgit" pull --rebase --autostash >/dev/null 2>&1; then
+    if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+        "$bin/rgit" rebase --abort >/dev/null 2>&1 || true
+    fi
+    echo 'rules-pull: failed; using local rules; local commits retained'
+    exit 0
+fi
+if [ -n "$("$bin/rgit" diff --name-only --diff-filter=U)" ]; then
+    echo 'rules-pull: failed; autostash conflicts; resolve manually'
+    exit 0
+fi
+if ! "$bin/install-rules"; then
+    echo 'rules-pull: failed to install; using local rules'
+fi

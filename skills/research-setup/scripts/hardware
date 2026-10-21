@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+printf '# Measured local hardware\n\n'
+printf 'OS: %s\n' "$(uname -srm)"
+case $(uname -s) in
+    Linux)
+        printf 'Logical CPUs: %s\n' "$(nproc)"
+        free -m | awk '/^Mem:/ {print "Memory total (MiB): " $2}'
+        ;;
+    Darwin)
+        printf 'Logical CPUs: %s\n' "$(sysctl -n hw.logicalcpu)"
+        printf 'Memory total (bytes): %s\n' "$(sysctl -n hw.memsize)"
+        ;;
+    *) echo 'Unsupported OS' >&2; exit 1 ;;
+esac

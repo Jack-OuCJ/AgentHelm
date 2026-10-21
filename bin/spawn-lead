@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Start a Lead for one task using ~/.config/research/env.
+
+Optional ~/.config/research/roles key=value lines: kind, model, effort.
+"""
+import argparse
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+
+from _toml import loads
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('task_dir')
+parser.add_argument('--kind', choices=('claude', 'codex'))
+parser.add_argument('--important', action='store_true')
+parser.add_argument('--copy', action='store_true', help='copy the start prompt to the clipboard')
+args = parser.parse_args()
+
+home = Path.home()
+task = Path(args.task_dir).expanduser().resolve()
+if not task.is_dir():
+    raise SystemExit(f'spawn-lead: not a directory: {task}')
+
+config = home / '.config/research'
+env_file = config / 'env'
+environment = env_file.read_text().strip() if env_file.exists() else 'cli-plain'
+if environment not in ('cli-herdr', 'cli-plain', 'app'):
+    raise SystemExit(f'spawn-lead: unknown environment in {env_file}: {environment}')
+
+roles = {}
+role = 'lead_important' if args.important else 'lead'
+roles_toml = config / 'roles.toml'
+if roles_toml.exists() and role in loads(roles_toml.read_text()).get('roles', {}):
+    selected = subprocess.check_output([str(Path(__file__).resolve().parent / 'models'), 'get', role], text=True).split()
+    roles = dict(zip(('kind', 'model', 'effort'), selected))
+else:
+    roles_file = config / 'roles'
+    if roles_file.exists():
+        for line in roles_file.read_text().splitlines():
+            key, separator, value = line.strip().partition('=')
+            if separator and key.strip() and not key.strip().startswith('#'):
+                roles[key.strip()] = value.strip()
+kind = args.kind or roles.get('kind', 'claude')
+if kind not in ('claude', 'codex'):
+    parser.error('Lead provider requires --kind claude|codex')
+model = roles.get('model') if kind == roles.get('kind', 'claude') else None
+effort = roles.get('effort') if kind == roles.get('kind', 'claude') else None
+
+prompt = (f'Lead task: {task}\n'
+          f'Read the task card in {task} (README.md, or AGENTS.md if present) and the root AGENTS.md, then prepare the confirmation '
+          'version of the alignment (question, method, primary metric, scope, stopping '
+          'conditions, authorized files, acceptance commands) and wait for the user to '
+          'confirm before executing. If the task card explicitly says pre-authorized, proceed within its authorized scope without another alignment confirmation.')
+
+if environment == 'cli-herdr':
+    herdr = shutil.which('herdr')
+    if not herdr:
+        raise SystemExit('spawn-lead: herdr not found; install it with bin/install-component herdr')
+    name = ('lead-' + re.sub(r'[^a-z0-9_-]', '-', task.name.lower()).strip('-_'))[:32]
+    created = subprocess.run([herdr, 'tab', 'create', '--cwd', str(task), '--label', name,
+                              '--no-focus'], text=True, capture_output=True)
+    if created.returncode:
+        raise SystemExit(created.stderr.strip() or 'spawn-lead: herdr tab create failed')
+    pane = json.loads(created.stdout)['result']['root_pane']['pane_id']
+    command = [herdr, 'agent', 'start', name, '--kind', kind, '--pane', pane]
+    agent_args = []
+    if kind == 'claude':
+        agent_args += ['--model', model] if model else []
+        agent_args += ['--effort', effort] if effort else []
+    else:
+        agent_args += ['-m', model] if model else []
+        agent_args += ['-c', f'model_reasoning_effort={effort}'] if effort else []
+    if agent_args:
+        command += ['--'] + agent_args
+    subprocess.run(command, check=True)
+    subprocess.run([herdr, 'agent', 'prompt', name, prompt], check=True)
+    print(f'spawn-lead: {name} started in {task}')
+else:
+    if model:
+        print(f'Lead selection: {kind} {model}' + (f' effort={effort}' if effort else ''))
+    print(prompt)
+    if args.copy:
+        for clipboard in (['pbcopy'], ['wl-copy'], ['xclip', '-selection', 'clipboard']):
+            if shutil.which(clipboard[0]):
+                try:
+                    subprocess.run(clipboard, input=prompt, text=True, check=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except (OSError, subprocess.CalledProcessError):
+                    continue
+                print('spawn-lead: start prompt copied to the clipboard')
+                break

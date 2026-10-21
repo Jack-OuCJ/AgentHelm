@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+[ -s "$HOME/.config/research/rules-remote" ] || exit 0
+bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+"$bin/install-rules"
+lint=$("$bin/kb" lint) || [ "$?" -eq 1 ]
+printf '%s\n' "$lint" | awk '
+    { print }
+    /^[^:]+:[0-9]+: / && !/^experiments\// && !/: warning: / { failed = 1 }
+    END { exit failed }
+'
+"$bin/scrub-check" "$HOME/.local/share/research-rules"
+gitdir=$("$bin/rgit" rev-parse --absolute-git-dir)
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -n "$("$bin/rgit" diff --name-only --diff-filter=U)" ]; then
+    echo 'rules-push: unresolved rebase or conflicts; resolve them first' >&2
+    exit 1
+fi
+"$bin/rgit" add -A
+if ! "$bin/rgit" diff --cached --quiet; then
+    "$bin/rgit" commit -m "${1:-Update private rules}"
+fi
+if ! "$bin/rgit" pull --rebase --autostash; then
+    if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+        "$bin/rgit" rebase --abort
+    fi
+    echo 'rules-push: pull failed; local commits retained; resolve manually' >&2
+    exit 1
+fi
+if [ -n "$("$bin/rgit" diff --name-only --diff-filter=U)" ]; then
+    echo 'rules-push: autostash conflicts; resolve manually' >&2
+    exit 1
+fi
+"$bin/rgit" push

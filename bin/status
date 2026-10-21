@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+experiments=$(CDPATH= cd -- "$bin/../experiments" && pwd)
+dir=$(pwd -P)
+while [ "$(dirname -- "$dir")" != "$experiments" ]; do
+    [ "$dir" != / ] || { echo 'Run inside experiments/<task>.' >&2; exit 2; }
+    dir=$(dirname -- "$dir")
+done
+case ${1:-} in needs-input|running|done|blocked) ;; *) echo 'Usage: status needs-input|running|done|blocked [description] [cost]' >&2; exit 2 ;; esac
+printf '%s | %s | %s | %s\n' "$1" "$(basename -- "$dir")" "${2:-}" "${3:-}" > "$dir/STATUS"
+"$bin/board"
+"$bin/kb" index
+exec "$bin/notion-sync" "$dir"

@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Create a numbered task card and start its Lead."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('slug')
+parser.add_argument('--important', action='store_true')
+parser.add_argument('--kind', choices=('claude', 'codex'))
+args = parser.parse_args()
+if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', args.slug):
+    parser.error('slug must be kebab-case')
+root = Path(__file__).resolve().parent.parent
+config = Path.home() / '.config/research'
+env = config / 'env'
+if env.exists() and env.read_text().strip() == 'cli-herdr':
+    listing = json.loads(subprocess.check_output(['herdr', 'agent', 'list'], text=True))
+    agents = listing['result'] if isinstance(listing, dict) else listing
+    if isinstance(agents, dict):
+        agents = agents['agents']
+    count = sum(agent['name'].startswith('lead-') for agent in agents)
+    if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '4')):
+        parser.error('Lead concurrency limit reached')
+experiments = root / 'experiments'
+experiments.mkdir(exist_ok=True)
+numbers = [int(match[1]) for parent in (experiments, experiments / 'archive', root / 'archive')
+           if parent.exists() for path in parent.iterdir()
+           if path.is_dir() and (match := re.match(r'^(\d+)-', path.name))]
+ident = f'{max(numbers, default=0) + 1:03d}-{args.slug}'
+task = experiments / ident
+task.mkdir()
+(task / 'findings').mkdir()
+card = '' if sys.stdin.isatty() else sys.stdin.read()
+if not card.strip():
+    card = (root / 'templates/task-card.md').read_text()
+(task / 'README.md').write_text(card.replace('<task-id>', ident))
+subprocess.run([str(root / 'bin/status'), 'running', 'Lead reading task card'], cwd=task)
+command = [str(root / 'bin/spawn-lead'), str(task)]
+if args.important:
+    command.append('--important')
+if args.kind:
+    command.extend(['--kind', args.kind])
+subprocess.run(command, check=True)

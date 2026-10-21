@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+remote=$HOME/.config/research/rules-remote
+[ -s "$remote" ] || exit 0
+exec git -C "$HOME/.local/share/research-rules" "$@"

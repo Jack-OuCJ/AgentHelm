@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Install templates, overlay a private rules checkout, and generate agent rules."""
+from pathlib import Path
+import os
+import shutil
+import socket
+import subprocess
+import zlib
+
+root = Path(__file__).resolve().parent.parent
+home = Path.home()
+config = home / '.config/research'
+config.mkdir(parents=True, exist_ok=True)
+(config / 'install-dir').write_text(str(root) + '\n')
+for directory in ('experiments', 'cards', 'reports', 'rules'):
+    (root / directory).mkdir(exist_ok=True)
+remote = config / 'rules-remote'
+private = home / '.local/share/research-rules'
+if remote.exists() and remote.read_text().strip():
+    if not private.exists():
+        private.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['git', 'clone', '--depth', '1', remote.read_text().strip(), str(private)], check=True)
+    else:
+        actual = subprocess.check_output(['git', '-C', str(private), 'config', '--get', 'remote.origin.url'], text=True).strip()
+        if actual != remote.read_text().strip():
+            raise SystemExit('Private rules remote changed; resolve the existing checkout first.')
+    for directory in ('templates', 'rules'):
+        if (private / directory).exists():
+            shutil.copytree(private / directory, root / directory, dirs_exist_ok=True)
+for source, target in (('claude-global.md', 'rules/claude-global.md'), ('research-AGENTS.md', 'AGENTS.md'),
+                       ('research-extra.md', 'rules-extra.md')):
+    path = root / target
+    template = root / 'templates' / source
+    if not template.exists():
+        continue
+    value = template.read_text()
+    if target == 'rules/claude-global.md' and remote.exists() and remote.read_text().strip() and (private / target).exists():
+        value = (private / target).read_text()
+    if path.exists() and path.read_text() != value:
+        backup = path.with_name(path.name + '.before-agenthelm')
+        if not backup.exists():
+            shutil.copy2(path, backup)
+    path.write_text(value)
+claude = home / '.claude'
+claude.mkdir(exist_ok=True)
+entry = claude / 'CLAUDE.md'
+content = entry.read_text() if entry.exists() else ''
+if '@AGENTS.md' not in content.splitlines():
+    if entry.exists() and not entry.with_suffix('.md.before-agenthelm').exists():
+        shutil.copy2(entry, entry.with_suffix('.md.before-agenthelm'))
+    entry.write_text(content + ('\n' if content and not content.endswith('\n') else '') + '@AGENTS.md\n')
+for command in ('sync-agents',):
+    subprocess.run([str(root / 'bin/kb'), command], check=True)
+cron_choice = config / 'rules-cron'
+if os.environ.get('RULES_CRON'):
+    cron_choice.write_text(os.environ['RULES_CRON'] + '\n')
+temporary_roots = [Path('/tmp'), Path('/private/tmp'), Path('/var/folders')]
+if os.environ.get('TMPDIR'):
+    temporary_roots.append(Path(os.environ['TMPDIR']).expanduser())
+temporary_home = any(home == path or path in home.parents for path in temporary_roots)
+if (not temporary_home or os.environ.get('RULES_CRON') == '1') and remote.exists() and remote.read_text().strip() and (not cron_choice.exists() or cron_choice.read_text().strip() == '1') and shutil.which('crontab'):
+    marker = '# research-rules-sync'
+    minute = zlib.crc32(socket.gethostname().encode()) % 50
+    line = f'{minute} 3 * * 0 PATH={home}/.local/bin:/usr/local/bin:/usr/bin:/bin "{root}/bin/rules-sync" >/dev/null 2>&1 {marker}'
+    current = subprocess.run(['crontab', '-l'], capture_output=True, text=True).stdout
+    kept = ''.join(l + '\n' for l in current.splitlines() if marker not in l)
+    subprocess.run(['crontab', '-'], input=kept + line + '\n', text=True, check=True)
+print('install-rules: ok')

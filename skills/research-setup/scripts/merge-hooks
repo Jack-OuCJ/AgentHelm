@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+case ${1:-} in ''|--apply) ;; *) echo 'Usage: merge-hooks [--apply]' >&2; exit 2 ;; esac
+settings=$HOME/.claude/settings.json
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+if [ -f "$settings" ]; then cp "$settings" "$tmp/input"; else printf '{}\n' > "$tmp/input"; fi
+command='"$(cat "$HOME/.config/research/install-dir")/bin/lead-watch-start"'
+jq --arg command "$command" '
+  .hooks.SessionStart = ((.hooks.SessionStart // []) |
+    if any(.[]; any(.hooks[]?; .type == "command" and .command == $command))
+    then . else . + [{matcher: "", hooks: [{type: "command", command: $command}]}] end)
+' "$tmp/input" > "$tmp/output"
+if [ "${1:-}" != --apply ]; then cat "$tmp/output"; exit 0; fi
+if [ -f "$settings" ] && cmp -s "$settings" "$tmp/output"; then
+    echo 'hooks: unchanged'
+    exit 0
+fi
+mkdir -p "$HOME/.claude"
+if [ -f "$settings" ]; then
+    backup=$(mktemp "$settings.backup.XXXXXX")
+    cp -p "$settings" "$backup"
+fi
+cp "$tmp/output" "$settings"
+echo 'hooks: merged'

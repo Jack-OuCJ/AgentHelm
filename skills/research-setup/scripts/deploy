@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Copy kit-owned directories and apply rules after the setup conversation."""
+import argparse
+from pathlib import Path
+import shutil
+import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('directory')
+parser.add_argument('--role', choices=('dispatcher', 'executor'))
+parser.add_argument('--env', choices=('cli-herdr', 'cli-plain', 'app'))
+parser.add_argument('--rules-remote')
+args = parser.parse_args()
+config = Path.home() / '.config/research'
+
+
+def saved(name):
+    path = config / name
+    return path.read_text().strip() if path.exists() else None
+
+
+role = args.role or saved('role')
+environment = args.env or saved('env')
+if role not in ('dispatcher', 'executor'):
+    raise SystemExit('deploy: pass --role, or save dispatcher/executor in ~/.config/research/role')
+if environment not in ('cli-herdr', 'cli-plain', 'app'):
+    raise SystemExit('deploy: pass --env, or save cli-herdr/cli-plain/app in ~/.config/research/env')
+source = Path(__file__).resolve().parents[3]
+target = Path(args.directory).expanduser().resolve()
+target.mkdir(parents=True, exist_ok=True)
+if source != target:
+    for relative in ('bin', 'templates', 'skills/research-setup'):
+        shutil.copytree(source / relative, target / relative, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    (target / 'assets').mkdir(exist_ok=True)
+    shutil.copy2(source / 'assets/logo.png', target / 'assets/logo.png')
+    for name in ('README.md', 'LICENSE', '.gitignore'):
+        if not (target / name).exists():
+            shutil.copy2(source / name, target / name)
+config.mkdir(parents=True, exist_ok=True)
+(config / 'role').write_text(role + '\n')
+(config / 'env').write_text(environment + '\n')
+if args.rules_remote is not None:
+    (config / 'rules-remote').write_text(args.rules_remote + '\n' if args.rules_remote else '')
+subprocess.run([str(target / 'bin/install-rules')], check=True)
+for agent in ('.claude', '.codex'):
+    link = Path.home() / agent / 'skills/research-setup'
+    link.parent.mkdir(parents=True, exist_ok=True)
+    destination = target / 'skills/research-setup'
+    if link.is_symlink() and link.resolve() == destination:
+        continue
+    if link.exists() or link.is_symlink():
+        backup = link.with_name('research-setup.before-agenthelm')
+        if backup.exists():
+            raise SystemExit('Existing skill and backup both present; resolve them before replacing.')
+        link.rename(backup)
+    link.symlink_to(destination, target_is_directory=True)
+subprocess.run([str(target / 'bin/kb'), 'sync-agents'], check=True)
+print('deploy: ok')
+if environment == 'cli-herdr':
+    print('deploy: run bin/install-component herdr if herdr is not installed')

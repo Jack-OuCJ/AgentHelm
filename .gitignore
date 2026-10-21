@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.agents/
+.aws/
+.codex/
+private-rules/
+skills-library/
+BOARD.md
+INDEX.md
+EXPERIMENTS.md
+*.before-agenthelm
+.compactions
+.notion-pending

@@ -1,0 +1,87 @@
+# Replace model names and commands for your environment (按你的环境替换).
+# Candidates: provider:model[:effort]. All CLI commands belong in this file.
+# When a command template uses {effort}, every candidate must include it.
+# Edit this file locally, then run bin/models to generate and sync agent rules.
+[providers]
+claude = true
+codex = true
+
+[commands.claude]
+template = 'claude --model {model} --effort {effort} {research_flags}'
+research_flags = "--settings '{\"enabledPlugins\":{\"ponytail@ponytail\":false}}'"
+check = 'claude --version'
+
+[commands.codex]
+template = 'codex exec -m {model} -c model_reasoning_effort={effort} {research_flags}'
+research_flags = ''
+check = 'codex --version'
+
+[roles.lead]
+desc = "Task lead"
+tier = "Strategist"
+candidates = ["claude:sonnet:medium"]
+mode = "first"
+research = false
+
+[roles.lead_important]
+desc = "Important task lead"
+tier = "Strategist"
+candidates = ["claude:opus:high"]
+mode = "first"
+research = false
+
+[roles.hard]
+desc = "Critical implementation"
+tier = "Executor"
+candidates = ["codex:gpt-5:high"]
+mode = "first"
+research = false
+
+[roles.fact]
+desc = "Research and implementation"
+tier = "Executor"
+candidates = ["claude:sonnet:medium"]
+mode = "first"
+research = "split"
+
+[roles.chore]
+desc = "Routine work"
+tier = "Helper"
+candidates = ["claude:haiku:low"]
+mode = "first"
+research = false
+
+[roles.writing]
+desc = "Reports"
+tier = "Strategist"
+candidates = ["claude:opus:medium"]
+mode = "first"
+research = false
+
+[roles.visual]
+desc = "Visual design"
+tier = "Strategist"
+candidates = ["claude:opus:high"]
+mode = "first"
+research = false
+
+[roles.review]
+desc = "Code review"
+tier = "Executor"
+candidates = ["codex:gpt-5:high", "claude:sonnet:high"]
+mode = "all"
+research = true
+
+[roles.simplify]
+desc = "Code simplification"
+tier = "Executor"
+candidates = ["codex:gpt-5:medium"]
+mode = "first"
+research = false
+
+[roles.aesthetic]
+desc = "Aesthetic review"
+tier = "Executor"
+candidates = ["claude:opus:high"]
+mode = "first"
+research = true

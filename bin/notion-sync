@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Mirror local STATUS and conclusions to an optional Notion database."""
+import json
+from pathlib import Path
+import re
+import sys
+import urllib.parse
+import urllib.request
+
+config = Path.home() / '.config/research/notion.env'
+if not config.exists():
+    raise SystemExit(0)
+values = dict(line.split('=', 1) for line in config.read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith('#') and '=' in line)
+database = values.get('NOTION_DB', '').strip().strip('\"\'')
+credential = values.get('NOTION_TOKEN', '').strip().strip('\"\'')
+if not database or not credential:
+    raise SystemExit(0)
+
+
+def api(method, path, body=None):
+    request = urllib.request.Request('https://api.notion.com/v1/' + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={'Authorization': 'Bearer ' + credential,
+        'Notion-Version': '2022-06-28', 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def text(value):
+    return [{'text': {'content': value[:1900]}}] if value else []
+
+
+def rewrite(page, conclusion):
+    blocks, cursor = [], None
+    while True:
+        path = f'blocks/{page}/children?page_size=100'
+        if cursor:
+            path += '&start_cursor=' + urllib.parse.quote(cursor)
+        result = api('GET', path)
+        blocks.extend(result['results'])
+        if not result.get('has_more'):
+            break
+        cursor = result['next_cursor']
+    for block in blocks:
+        api('DELETE', 'blocks/' + block['id'])
+    paragraphs = [conclusion[i:i + 1900] for i in range(0, len(conclusion), 1900)]
+    for offset in range(0, len(paragraphs), 100):
+        api('PATCH', f'blocks/{page}/children', {'children': [
+            {'object': 'block', 'type': 'paragraph', 'paragraph': {'rich_text': text(p)}}
+            for p in paragraphs[offset:offset + 100]]})
+
+
+def sync(task):
+    state, name, description, cost = [part.strip() for part in (task / 'STATUS').read_text().split('|', 3)]
+    properties = {'Name': {'title': text(name)}, 'Status': {'rich_text': text(state)},
+                  'Summary': {'rich_text': text(description)}, 'Cost': {'rich_text': text(cost)}}
+    conclusion = ''
+    readme = task / 'README.md'
+    if readme.exists():
+        body = readme.read_text()
+        headings = list(re.finditer(r'^#{1,2} (?:Conclusion|结论)[^\n]*(?:\n|$)', body, re.M))
+        if headings:
+            conclusion = re.split(r'(?m)^#{1,2} ', body[headings[-1].end():], maxsplit=1)[0].strip()
+    properties['Conclusion'] = {'rich_text': text(conclusion)}
+    filters = [{'property': 'Name', 'title': {'equals': name}}]
+    identity = Path.home() / '.config/research/machine'
+    if identity.exists():
+        schema = api('GET', f'databases/{database}')['properties'].get('Machine')
+        if schema:
+            machine = identity.read_text().strip()
+            kind = schema['type']
+            if kind in ('select', 'rich_text'):
+                properties['Machine'] = {kind: {'name': machine} if kind == 'select' else text(machine)}
+                filters.append({'or': [
+                    {'property': 'Machine', kind: {'equals': machine}},
+                    {'property': 'Machine', kind: {'is_empty': True}}]})
+    rows = api('POST', f'databases/{database}/query',
+               {'filter': {'and': filters}, 'page_size': 1})['results']
+    if rows:
+        page = rows[0]['id']
+        api('PATCH', 'pages/' + page, {'properties': properties})
+    else:
+        page = api('POST', 'pages', {'parent': {'database_id': database}, 'properties': properties})['id']
+    if state == 'done':
+        rewrite(page, conclusion)
+
+
+task = Path(sys.argv[1]).resolve()
+try:
+    sync(task)
+except (OSError, ValueError, KeyError):
+    (task / '.notion-pending').touch()
+    print('notion-sync: failed; local STATUS retained; rerun notion-sync <task> to retry', file=sys.stderr)
+    raise SystemExit(1)
+(task / '.notion-pending').unlink(missing_ok=True)
+print('notion-sync: ok')
