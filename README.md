@@ -1,305 +1,131 @@
-<p align="center">
-  <img src="assets/logo.png" width="160" alt="AgentHelm logo">
-</p>
+# AgentHelm：本地优先的多智能体工作区
 
-<h1 align="center">AgentHelm</h1>
+维护者：[Jack-OuCJ](https://github.com/Jack-OuCJ)。项目仓库：[Jack-OuCJ/AgentHelm](https://github.com/Jack-OuCJ/AgentHelm)。
 
-<p align="center">
-A local-first workspace that lets one dispatcher session hand research tasks to multiple Lead and executor agents (Claude Code, Codex) under one rule set and one task board.
-</p>
+基于 [blankhoney/agentlord](https://github.com/blankhoney/agentlord) 的 `main` 分支快照 `8c96addde0a35230bed7ff9db45affd1c31bf051` 创建。本分支包含工作区范围适配，不应直接照搬上游的全局部署教程。
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-</p>
+配置范围限定在 `/Users/jack/Projects/AgentHelm`。全局 AGENTS.md、CLAUDE.md、skills、Claude/Codex 设置、账号、代理和 Herdr 钩子均不由本项目管理。项目会话仍会读取用户级规则及可发现的 skills；本适配实现配置分域，不提供操作系统级安全隔离。
 
-维护者：欧聪杰（[Jack-OuCJ](https://github.com/Jack-OuCJ)）
+## 开始使用
 
-项目仓库：[Jack-OuCJ/AgentHelm](https://github.com/Jack-OuCJ/AgentHelm)
+首次使用先初始化当前 checkout，再进入 Herdr：
 
-## What it is
-
-AgentHelm keeps research state on disk, so several agent sessions share one rule set and one task board.
-
-Without it, each session reads different rules, status lives in chat, and after `/clear`, context compaction or a machine change the next session starts from nothing.
-
-Use it when several Claude Code or Codex sessions work in parallel on experiments, reproductions or option comparisons. A single-session, one-off question does not need it.
-
-What the shipped rules and tools give you:
-
-- **A research workflow that sizes before it runs**: a pilot measures cost per sample, the sample size is derived from the gap you need to resolve, fairness is checked before scaling, and conclusions use a fixed Tendency/Confidence format with numbers traceable to `results.jsonl`.
-- **One alignment round per task**, with a fixed confirmation layout, four allowed reasons to interrupt the user afterwards, and a skip when the task card says the user pre-authorized defaults.
-- **Named roles instead of model names**: ten roles in three tiers; a local `roles.toml` maps roles to your models and commands, and `bin/models` renders the table every agent reads.
-- **A bounded review loop**: one parallel round by different models, one merged fix list, one re-review of the fix diff.
-- **Context that survives `/clear`**: STATUS, task memory and conclusion lines are injected at session start.
-- **Checks**: `bin/kb lint` for missing fields, broken paths in rules, size budgets and cleanup; `bin/scrub-check` before anything leaves the machine.
-
-## Architecture
-
-The diagram shows one task's path from the dispatcher to a recorded result. The table lists what each role reads and writes, and who starts it.
-
-```mermaid
-flowchart LR
-    U[User] --> D[Dispatcher session]
-    R[(Rules: kit templates<br/>+ private repository)] --> D
-    R --> L
-    D -->|task card| T[(experiments/NNN-slug)]
-    D -->|spawn-lead| L[Lead session]
-    L -->|read rules and card| T
-    L -->|delegate| E[Executor agents<br/>Claude, Codex, other]
-    E -->|results.jsonl, artifacts| T
-    L -->|bin/status| S[STATUS]
-    S --> B[bin/board<br/>BOARD.md]
-    B --> D
+```sh
+cd /Users/jack/Projects/AgentHelm
+python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-herdr
+herdr
 ```
 
-| Role | Reads | Writes | Started by |
-| --- | --- | --- | --- |
-| Dispatcher | `BOARD.md`, `STATUS` file | task directories, start prompts | you |
-| Lead | root `AGENTS.md`, the task card, `INDEX.md` | `STATUS`, the conclusion | `bin/spawn-lead`, or you in `cli-plain` and `app` |
-| Executor | the delegation prompt and the root `AGENTS.md` | assigned files, `results.jsonl`, artifacts | the Lead |
+在 Herdr 内的终端启动主会话：
 
-## Rules layering
-
-Generated rules come from four sources:
-
-1. `templates/` in the kit: public defaults for the workflow, executor conventions and runtime environments.
-2. Your private rules repository: its `rules/` and `templates/` replace files with the same name in the installed workspace.
-3. `~/.claude/local.md`: machine facts (hardware, timezone, concurrency measure, storage, browser tool, notification channel); it stays on the machine.
-4. `~/.config/research/models.md`: the role-to-model table that `bin/models` generates from `~/.config/research/roles.toml`; it stays on the machine.
-
-`bin/kb sync-agents` writes `~/.claude/AGENTS.md`; when `~/.codex`, `~/.gemini` or `~/.pi/agent` exist, it writes the same content there.
-
-Each file contains the executor conventions, the environment section, `local.md`, `models.md` and `rules/claude-global.md`. The workspace gets `AGENTS.md` (from `templates/research-AGENTS.md`) and `rules-extra.md` (from `templates/research-extra.md`: strict mode, long runs, context handover, cleanup and conflicts). `~/.claude/CLAUDE.md` gets one `@AGENTS.md` line; replaced files are saved as `*.before-agenthelm`.
-
-Private rules are optional. Without a repository, the shipped templates are used and `rules-pull` and `rules-push` exit 0.
-
-With one, edit `rules/` or `templates/` in `~/.local/share/research-rules`; the repository needs at least one commit before selection.
-
-After editing, run `bin/install-rules` to apply locally; `bin/rules-push` publishes, and `bin/rules-pull` pulls and reapplies.
-
-- `rules-push` first runs `bin/install-rules`, then `bin/kb lint` (errors outside `experiments/` block the push), then `bin/scrub-check`; it rebases with autostash, and on failure aborts the rebase, keeps your local commit and exits 1.
-- `rules-pull` only warns on failure and skips while a rebase is in progress, so it never blocks a session.
-- The weekly cron job is not installed when `HOME` is in a temporary directory (`/tmp` or the macOS temporary folder), as in test runs.
-
-### Optional: keep the whole workspace in Git
-
-The default syncs only `rules/` and `templates/`. If you prefer to version the entire workspace (tasks, cards, reports), keep the Git data outside it so agents scanning the directory do not see it, for example `git --git-dir="$HOME/.local/share/research.git" --work-tree="$HOME/research"`, wrapped in a small alias. Ignore large artifacts, virtual environments and credentials, and run `bin/scrub-check --git-dir <path>` before every push so the external history is scanned too. This mode is a documented option, not something the kit sets up.
-
-## Runtime environments
-
-Three environments are available: `cli-herdr` (recommended for terminals), `cli-plain` (terminal without herdr) and `app` (Claude app or Codex app). `bin/spawn-lead` reads the choice from `~/.config/research/env`.
-
-| Aspect | `cli-herdr` | `cli-plain` | `app` |
-| --- | --- | --- | --- |
-| Lead startup | `bin/spawn-lead` creates a herdr tab and starts Claude or Codex there | prints the start prompt; open another terminal or tmux and paste it | prints the prompt; create a session or project in the app at the task directory |
-| Dispatcher-Lead communication | same harness: built-in cross-session messaging; mixed Claude/Codex: `herdr agent prompt` | through `STATUS` and `bin/board` only | through `STATUS` and `bin/board` only |
-| Concurrency | count with `herdr agent list` | limited by machine resources | managed by the app |
-| Cleanup | close the tab and confirm no process remains | close the terminal | handled by the app |
-
-Choose `cli-herdr` or `cli-plain` for a terminal, and `app` for the Claude app or Codex app. `app` does not install herdr. The choice is per machine and does not enter any repository.
-
-## Install
-
-Requires Linux or macOS, Python 3.9+, Git, a POSIX shell and `jq`. No administrator access is needed. Get a local copy of this repository, open an agent session in it, and send this prompt:
-
-```text
-Read skills/research-setup/SKILL.md in this checkout and set up my research workspace.
-Ask all setup questions first and install only the components I select.
+```sh
+./bin/dispatch
 ```
 
-The skill collects the installation directory (default `~/research`), environment, role, board, optional components and a private rules repository, then runs the installer and checks.
+Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动或连接现有会话。
 
-See `skills/research-setup/SKILL.md` for details. To upgrade, run the skill from an updated kit copy.
+向主会话描述任务即可。需要独立 Lead 时，先准备 `templates/task-card.md` 格式的任务卡，再运行：
 
-`deploy` refreshes `bin/`, `templates/`, the skill and `assets/logo.png`, and keeps other workspace files.
-
-### Optional components
-
-| Component | What it adds | Installed as |
-| --- | --- | --- |
-| herdr | Terminal tabs and sessions | Linux or macOS binary in `~/.local/bin` |
-| ponytail | Code-minimization guideline skill | Claude plugin, Codex skill, or both |
-| caveman | Output-style skill | Claude plugin, Codex skill, or both |
-| claude-hud | Claude Code status bar | Claude plugin; activate it inside Claude Code |
-| skills-library | Scientific skills catalog | copied into `<workspace>/skills-library`; dependencies are not installed |
-
-Sources: [herdr](https://github.com/herdrdev/herdr), [ponytail](https://github.com/DietrichGebert/ponytail), [caveman](https://github.com/JuliusBrussee/caveman), [claude-hud](https://github.com/jarrodwatts/claude-hud) and the MIT [scientific skills library](https://github.com/K-Dense-AI/scientific-agent-skills). The kit downloads each component from its upstream repository at install time and does not bundle upstream code.
-
-- Add a component later with `bin/install-component <name>`; ponytail and caveman also accept `--agent claude|codex|both`.
-- herdr installs to `~/.local/bin`; keep that directory on `PATH` so `bin/spawn-lead` can find it.
-
-## Layered delegation (Orchestra)
-
-Layered delegation, called Orchestra in the templates, sends each piece of work to the cheapest role that can do it. Rules name roles only; which model plays each role is a local choice.
-
-| Role | Tier | Does |
-| --- | --- | --- |
-| `lead` | Strategist | aligns, designs, accepts and concludes one task |
-| `lead_important` | Strategist | the same for tasks the user marks important |
-| `visual` | Strategist | visual design and construction |
-| `writing` | Strategist | report prose and documentation |
-| `hard` | Executor | hard debugging, critical implementation, reproductions |
-| `fact` | Executor | default execution: exploration, implementation to a spec, experiments, tests |
-| `review` | Executor | code review, two different models in parallel |
-| `simplify` | Executor | simplification pass over a finished change |
-| `aesthetic` | Executor | aesthetic review of visual work |
-| `chore` | Helper | fixed, mechanically checkable work: search, log extraction, template filling, cleanup |
-
-The full does/does-not table, delegation rules and the review loop are in `templates/claude-global.md`.
-
-Configure roles:
-
-```bash
-cp templates/roles.toml.example ~/.config/research/roles.toml
-$EDITOR ~/.config/research/roles.toml    # providers, command templates, candidates per role
-bin/models                               # render models.md and run bin/kb sync-agents
-bin/models get fact                      # print the selected provider, model and effort; full commands are in ~/.config/research/models.md
-bin/models check                         # run each provider's optional check command
+```sh
+./bin/new-task my-task < /path/to/card.md
 ```
 
-To change a role or switch a provider off (for example when its quota runs out), edit `roles.toml` (`candidates`, or `[providers]`) and rerun `bin/models`; roles fall back to their next enabled candidate.
+任务目录会编号为 `experiments/001-my-task/`，Herdr 在该目录创建独立 Lead 会话。该命令会真正启动模型，需在任务授权范围内使用；安装自检使用替身，不调用模型。
 
-- Each role lists `candidates` as `provider:model[:effort]`; `mode = "first"` takes the first enabled one, `mode = "all"` uses every enabled one (for parallel reviewers).
-- `research = true` adds the provider's `research_flags` to the command (for example, disabling a code-minimization plugin for research work); `"split"` renders both a research command and a construction command.
-- With only one model family, map Strategist roles to its strongest model and `chore` to its smallest.
-- `bin/spawn-lead` takes the Lead model from `bin/models get lead` (or `lead_important`). Without `roles.toml` it still reads the legacy `~/.config/research/roles` (`kind`, `model`, `effort`). If `roles.toml` has no Lead role, it falls back to the legacy file, then to plain `claude`. When `--kind` names a different harness than the role's provider, no model is passed and that harness uses its default. Models are applied only when a herdr tab is started; in `cli-plain` and `app` the printed prompt is followed by a `Lead selection` line so you can start the session with the same model.
+没有 Herdr 时将 `.agenthelm/config/env` 改为 `cli-plain`，`spawn-lead` 会打印交接提示而不创建会话。
 
-## Tasks
+## 会话与规则如何组合
 
-Write a task card from `templates/task-card.md` and open the task:
+主会话 → 任务卡 → Lead → 明确范围的 executor → 验收与结论。文件是持久交接载体，Herdr 提供会话容器。每个角色仍需按需加载 skill，不会自动继承父会话所有上下文。
 
-```bash
-cd ~/research
-$EDITOR /tmp/card.md                      # question verbatim, type, pre-authorized, decisions, budget
-bin/new-task baseline-eval < /tmp/card.md  # creates experiments/NNN-baseline-eval/ and starts a Lead
-bin/new-task paper-repro --important < /tmp/card.md
+- 根入口：`AGENTS.md`；Claude 的项目 `CLAUDE.md` 引用它。
+- 本地路由：`skills/agenthelm-workflow/SKILL.md`，按角色读取 references。
+- 注册位置：`.agents/skills/`（Codex）和 `.claude/skills/`（Claude），均链接到本仓库真实 skill，未注册到全局。
+- 实验方法：`rules/research-workflow.md`、`rules-extra.md`，仅在需要时读取。
+- 模型映射、机器约定：`.agenthelm/config/roles.toml`、`models.md`、`local.md`。
+- Claude 项目 SessionStart：`.claude/settings.json`；恢复主会话和任务上下文，不联网同步规则。
+- 既有全局 skills 仍可用，不覆盖、不搬移；代码审查继续按 Jack 的 Matt code-review 规则。
+
+`bin/spawn-lead`、`bin/dispatch` 和 `bin/run-executor` 都会显式传递根规则、路由和角色路径。原生子代理也需在委派中写出这些信息；仅在项目目录启动不代表 skill 正文已加载。
+
+## 模型分配
+
+首次配置中，Claude 负责主会话、Lead、fact/chore/writing/visual/aesthetic；Codex 负责 hard/simplify。所有候选均为 `default`，复用各 CLI 的现有模型、账号与权限。因此目前分角色，但尚未按价格档位分配不同模型。
+
+编辑 `.agenthelm/config/roles.toml` 后运行：
+
+```sh
+./bin/models
+./bin/models check
 ```
 
-- `bin/new-task` numbers the directory (counting `archive/` too), writes the card to `README.md` (or copies the template when stdin is a terminal), creates `findings/`, sets STATUS to `running` and calls `bin/spawn-lead`. In `cli-herdr` at most `RESEARCH_MAX_LEADS` Leads (default 4) run at once; `--kind codex` starts a Codex Lead.
-- `bin/spawn-lead <task-dir>` starts a Lead for an existing task directory. In `cli-plain` and `app` it prints the start prompt to paste.
-- With `Pre-authorized: yes` in the card, the Lead skips the confirmation round and writes the frozen version directly.
-- Update status from the task directory with `~/research/bin/status running "Baseline run" 0.20`. `bin/status` accepts `running`, `needs-input`, `blocked` and `done`; every change reruns `bin/board`, `bin/kb index` and the Notion mirror when configured.
-- Record each real run in `results.jsonl` with `command`, `exit_code` and `artifact`; `bin/kb lint` rejects incomplete records.
-- Write conclusions as `## Conclusion (YYYY-MM-DD)` followed by `- **Tendency**: …` and `- **Confidence**: …`; the index parses these lines.
-- Delegated exploration writes `findings/<topic>-<executor>.md`; long-lived task notes go to `memory/` with a `memory/MEMORY.md` index.
-- Research cards live in `cards/<id>.md` with `id`, `topic`, `sources`, `date`, `valid_for` and `superseded_by`, within 150 lines.
+`review` 条目只是能力映射；不能覆盖用户的代码审查规则。`bin/run-executor` 不提供 review 模式。CLI 的模型标识和 effort 需按实际服务配置填写。
 
-### Context after `/clear`
+## 领域 skills 路由
 
-The Claude Code SessionStart hook (installed by the setup skill) runs `bin/lead-watch-start`. Codex has no such hook: Codex-only users run `~/research/bin/lead-reload .` (or `<workspace>/bin/lead-reload .`) from the task directory at the start of each new session.
+本仓库不预装领域 skills。`bin/build-routers` 根据手写 TOML 分组和每个 skill 的 metadata 生成目录与指向 SKILL.md 的索引；不会自行训练路由模型或替你决定分类。
 
-- At a task root it calls `bin/lead-reload`, which injects STATUS, this task's conclusion lines from `INDEX.md` and `memory/MEMORY.md`; after 3 compactions it reminds the Lead that the session can be cleared after the next milestone.
-- At the workspace root (dispatcher) it injects `TODO.md`, the STATUS of unfinished tasks and the last 3 finished ones.
+示例存为 `.agenthelm/config/routers.toml`：
 
-### Commands
-
-| Command | Does |
-| --- | --- |
-| `bin/new-task <slug> [--important] [--kind claude\|codex]` | create a numbered task from a card on stdin and start its Lead |
-| `bin/spawn-lead <task-dir>` | start or print the start prompt for a Lead |
-| `bin/status <state> [desc] [cost]` | write STATUS, refresh board, index and Notion |
-| `bin/board` | print the board and write `BOARD.md` |
-| `bin/models [get <role>\|check]` | render `models.md` and sync agent rules; print one role; probe providers |
-| `bin/lead-reload <task-dir>` | print the handover context for a task |
-| `bin/kb index \| lint [--brief] \| sync-agents` | regenerate indexes, check the workspace, regenerate agent rules |
-| `bin/install-rules`, `bin/rules-pull`, `bin/rules-push` | apply, pull and publish private rules |
-| `bin/scrub-check` | scan for secrets and private terms before sharing |
-| `bin/install-component <name>` | install an optional component |
-| `bin/build-routers` | generate skill routers from your local `~/.config/research/routers.toml`; without it, prints the schema |
-
-`bin/kb lint` reports errors for missing card or result fields and for `bin/…` or `templates/…` paths in rule files that do not exist, and warnings for size budgets (workspace `AGENTS.md` 16384 bytes, `rules/claude-global.md` 8192 bytes, `INDEX.md` 300 lines, cards 150 lines, task READMEs 300 lines) and for finished task directories over 200 MB. The budgets are constants at the top of `bin/kb`.
-
-### Board
-
-Notion is the recommended board. The local board is always written and needs no external service: `bin/board` prints the table, writes `BOARD.md` and includes `TODO.md`.
-
-- Create `~/.config/research/notion.env` with `NOTION_DB` and `NOTION_TOKEN`, and share the database with the integration.
-- Use properties `Name` (title), `Status`, `Summary`, `Cost` and `Conclusion` (rich text). Task IDs must be unique across machines that share the database.
-- Optional `Machine` property (select or rich text) for several machines sharing one database: written only when `~/.config/research/machine` exists; an existing row with an empty Machine is filled in rather than duplicated.
-- A network failure keeps the local `STATUS` and leaves `.notion-pending`; rerun `bin/notion-sync <task-dir>`.
-
-## Customize for your environment
-
-The kit ships rules that name roles and say "see local.md"; everything machine- or account-specific is yours to fill in. Recommended choices:
-
-| Item | Where | Recommendation |
-| --- | --- | --- |
-| Models, commands, providers | `~/.config/research/roles.toml` (from `templates/roles.toml.example`) | Strongest model for `lead_important`, `visual` and `writing`; a capable mid-price model for `lead`, `fact` and `hard`; the cheapest for `chore`; two different families for `review`. Put every CLI invocation, including flags, in the command templates. |
-| Proxies, gateways, quota | `roles.toml` command templates and your shell environment | Keep endpoints and keys in environment variables or `~/.config/research/`, never in rules. When a quota runs out, set that provider to `false` under `[providers]` and rerun `bin/models`. |
-| Machine size and concurrency | `local.md`, "Machine" and "Concurrency" | Measure with `skills/research-setup/scripts/hardware`. Gate parallel tests, builds and browsers by your user's real anonymous memory, not "available" memory; set build parallelism to about half the CPUs. |
-| Timezone | `local.md`, "Time" | The zone you want times reported in, plus the command that prints it. |
-| Notifications | `local.md`, "Notifications" and the environment section | Built-in cross-session messaging where the harness has it; otherwise STATUS plus `bin/board`. Phone push is optional private wiring. |
-| Notion | `~/.config/research/notion.env` | Optional; without it the local `BOARD.md` is the board. |
-| herdr | `~/.config/research/env` | `cli-herdr` for terminals if you want automatic Lead tabs; `cli-plain` or `app` otherwise. |
-| Browser checks | `local.md`, "Browser checks" | One tool per platform, one browser at a time, closed after use; on headless Linux a CLI automation tool driving local Chrome, on macOS a desktop browser agent. |
-| Skill library path and routers | `<workspace>/skills-library` (optional component) | Install only the skills you use. For domain routers, write `~/.config/research/routers.toml` (library path, output directory, prefix, one entry per router) and run `bin/build-routers`; every library skill must belong to exactly one router. |
-| Private rules | your own Git repository | Override only `rules/` and `templates/`; keep personal preferences there, not in the kit. |
-
-## Privacy
-
-The repository contains no credentials or personal rules. Keep private scrub terms in `~/.config/research/scrub-terms.txt`, one expression per line.
-
-- `bin/scrub-check` scans working files (including ignored files), filenames, symlink targets and committed Git history.
-- It prints locations and redacts matched content; it reads working files and committed history, not the Git index, so commit before scanning.
-- Without the private list it warns and checks generic secret patterns only.
-- Run it before sharing the workspace or sending a patch.
-
-Notion credentials belong in `~/.config/research/notion.env`, never in chat or a repository.
-
-Global rule files replaced by the installer are saved as `*.before-agenthelm`; inspect them before deleting.
-
-## Repository layout
-
-```text
-<workspace>/                    # default ~/research
-├── README.md, LICENSE          # copied when absent
-├── AGENTS.md                   # workflow rules (from templates/research-AGENTS.md)
-├── rules-extra.md              # strict mode, long runs, handover, conflicts
-├── INDEX.md, EXPERIMENTS.md    # generated by bin/kb index
-├── BOARD.md                    # generated by bin/board
-├── TODO.md                     # dispatcher's open items (optional)
-├── bin/                        # new-task, spawn-lead, status, board, models, lead-reload, kb, rules-*, scrub-check
-├── templates/                  # task card, rule templates, environment sections
-├── skills/research-setup/      # installer skill, linked into ~/.claude and ~/.codex
-├── rules/claude-global.md      # generated from templates or a private override
-├── experiments/<task-id>/      # README.md (task card + conclusion), STATUS, results.jsonl, findings/, memory/
-├── cards/, reports/            # research cards and reports
-└── skills-library/             # optional component
+```toml
+library = "../../skills-library"
+output = "../../skills"
+prefix = "route-"
+[routers.example]
+title = "示例任务"
+description = "在处理对应领域任务时使用。"
+skills = ["example-skill"]
 ```
 
-Outside the workspace: `~/.claude/local.md` (machine facts), `~/.config/research/` (`env`, `role`, `roles.toml`, `models.md`, `notion.env`, `scrub-terms.txt`).
+库中的每个 skill 必须恰好归一个路由。library/output 必须在工作区；生成后在项目 `.agents/skills` 和 `.claude/skills` 注册需要的路由。已有手写 skill 不会被同名生成覆盖。
 
-`deploy` copies `bin/`, `templates/`, the skill and `assets/logo.png`, and adds `README.md` and `LICENSE` when absent; `install-rules` creates `experiments/`, `cards/`, `reports/` and `rules/`.
+## 自检与维护
 
-## Limitations
+```sh
+python3 skills/research-setup/scripts/smoke.py
+./bin/kb lint
+```
 
-- Private rules repositories currently overlay only `templates/` and `rules/`; they do not overlay `bin/`, and no private-script override point exists yet.
-- The `app` environment has not been verified in a real Claude App or Codex App session.
-- `bin/models check` only runs the check commands you configure; it does not verify that a model name exists or that quota remains.
-- The sample-size formulas are rules of thumb for paired or unpaired accuracy comparisons, not a replacement for a power analysis.
-- `bin/build-routers` ships without a category table; you write `~/.config/research/routers.toml` yourself.
-- Rule templates are English only.
+如需核对全局规则、配置和 skills 是否变化，先运行 `bin/global-config-check --record` 建立本机基线，后续运行 `bin/global-config-check` 只读比对。基线保存在 `.agenthelm/state/`，不会随 Git 克隆；后续你自己改了全局配置会正常报告变化，不会自动回滚。
 
-## License
+重复部署：
 
-MIT. Separately downloaded components retain their upstream licenses.
+```sh
+python3 skills/research-setup/scripts/deploy /Users/jack/Projects/AgentHelm --role dispatcher --env cli-herdr
+```
 
-## 中文简介
+工作区配置和任务内容被 Git 忽略。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
 
-AgentHelm 是一个本地优先的研究工作区：一个调度台会话把任务派给多个 Lead 和执行 agent（Claude Code、Codex），共用一套规则和一个任务看板。
+全局组件安装、私有规则覆盖、自动 push/cron 已禁用。任务看板需在本机单独配置；未配置时只维护本地状态。合并上游更新时应逐项检查是否重新引入全局行为，不能直接重置或强制覆盖本地适配。
 
-- 规则分四层：kit 模板、私有规则仓库、`~/.claude/local.md` 中的本机事实、`bin/models` 生成的 `~/.config/research/models.md`。生成的 `AGENTS.md` 分发给各 agent。
-- 任务放在 `experiments/<task-id>/`，含任务卡、`STATUS`、`results.jsonl` 和产物。看板推荐 Notion，本地 `bin/board` 无需外部服务。
-- 运行环境三选一：`cli-herdr`（终端，推荐）、`cli-plain`（终端，不用 herdr）、`app`（Claude app / Codex app）。安装时询问，写入 `~/.config/research/env`。
-- 在仓库副本中打开 agent 会话，把安装提示交给它。
-- 分层委派：规则只写角色名（lead、lead_important、visual、writing、hard、fact、review、simplify、aesthetic、chore，分属 Strategist、Executor、Helper 三层）；本机 `~/.config/research/roles.toml` 决定每个角色用哪个模型和命令，`bin/models` 生成 `models.md` 并并入各 agent 的规则。
-- 研究流程：先试点再按要分辨的差距算样本量，先验证公平性再放大；对齐一轮（任务卡写明预授权时免对齐）；结论用固定的 Tendency/Confidence 格式；审查一轮并行、一张修复单、只复审修复 diff。
-- `bin/new-task` 一键开任务；`/clear` 后由 `bin/lead-reload` 注入 STATUS、任务 memory 与结论行。
-- 机器规格、时区、并发口径、浏览器、通知、Notion、herdr 都在 `local.md` 或 `~/.config/research/` 里按你的环境自定义，见「Customize for your environment」。`app` 环境尚未实测。
-- `bin/scrub-check` 在分享前扫描工作文件、文件名和 Git 历史。许可证 MIT；第三方组件遵循各自许可。
+## 飞书任务观测
 
-## 来源
+配置飞书看板后，每次调用 `bin/status`，先原子更新本地 STATUS、看板和索引，再运行 `bin/board-sync` 同步到飞书。同步固定使用 `board.json` 指定的 profile 和用户身份，保留既有 lark-cli 全局企业选择。
 
-基于 [blankhoney/agentlord](https://github.com/blankhoney/agentlord) 的 `main` 分支快照 `8c96addde0a35230bed7ff9db45affd1c31bf051` 创建。AgentHelm 使用独立的 Git 提交历史。
+目标表、视图、稳定字段 ID、中文状态映射及工作区标识保存在 `.agenthelm/config/board.json`，其中不保存账号密钥。实际凭据由既有 lark-cli 管理；授权到期时需重新授权原 profile。
 
-AgentHelm 由欧聪杰（Jack-OuCJ）维护，采用 [MIT License](LICENSE)。所包含的上游代码的原始版权与完整许可见 [NOTICE](NOTICE)。
+- 同一个工作区标识加任务编号对应同一条记录。同步先精确查找再创建或更新；并发写入在工作区内串行，遇到重复标识会停止同步。
+- 四种状态映射：running → 进行中，needs-input → 待输入，blocked → 阻塞，done → 完成。
+- 同步字段包括任务名称、编号、状态、进展、Lead 标签、更新时间、结论、成本及工作区。Lead 是会话命名约定，不是进程存活证明；成本仅同步手工传入的值，不自动计算。
+- 读取飞书记录使用 NDJSON 文件；写入后按字段 ID 回读校验。若远端写入结果不明，下次先查询标识，避免盲目重复创建。
+- 网络、权限或字段错误不覆盖本地状态，也不让本地状态更新失败；任务目录留下 `.feishu-pending`，本地看板和主会话恢复提示会显示待同步。
+- 这是一向观测同步。飞书编辑不会触发本地 Agent，也没有常驻轮询、心跳或定时任务。状态变化由 Lead 主动调用命令报告。
+
+在任务目录报告进展：
+
+```sh
+/Users/jack/Projects/AgentHelm/bin/status running "正在验证"
+/Users/jack/Projects/AgentHelm/bin/status done "验证完成"
+```
+
+从工作区根目录补同步全部任务：
+
+```sh
+./bin/board-sync --all
+```
+
+自动化测试使用替身 CLI，不连接真实飞书服务。目标表及 profile 必须在本机明确配置并授权；原工作区的配置和验收记录不会随代码迁入新项目。
+
+## 许可
+
+AgentHelm 采用 [MIT License](LICENSE)。所包含的上游代码的原始版权与完整许可见 [NOTICE](NOTICE)。

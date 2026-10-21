@@ -25,7 +25,7 @@
 
 ## Budget and resources
 - Time and cost limits: <stated by the user, or "open: Lead confirms after the pilot">
-- Hardware: see `~/.claude/local.md`. Network: <yes / no>. Lead role: <lead / lead_important>
+- Hardware: see `.agenthelm/config/local.md`. Network: <yes / no>. Lead role: <lead / lead_important>
 
 ## Existing evidence (grep INDEX.md; "none" if none)
 - <card IDs or task IDs with line>

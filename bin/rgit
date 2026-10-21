@@ -1,5 +1,4 @@
 #!/bin/sh
-set -eu
-remote=$HOME/.config/research/rules-remote
-[ -s "$remote" ] || exit 0
-exec git -C "$HOME/.local/share/research-rules" "$@"
+# Disabled in this workspace adaptation: no private remote or automatic commits/pushes.
+printf '%s\n' "rgit: disabled in workspace mode; edit project rules locally"
+exit 0

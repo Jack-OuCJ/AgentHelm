@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Start a Lead for one task using ~/.config/research/env.
+"""Start a Lead for one task using .agenthelm/config/env.
 
-Optional ~/.config/research/roles key=value lines: kind, model, effort.
+Optional .agenthelm/config/roles key=value lines: kind, model, effort.
 """
 import argparse
 import json
+import os
+from _workspace import CONFIG, task_directory, bootstrap
 from pathlib import Path
 import re
 import shutil
@@ -19,12 +21,8 @@ parser.add_argument('--important', action='store_true')
 parser.add_argument('--copy', action='store_true', help='copy the start prompt to the clipboard')
 args = parser.parse_args()
 
-home = Path.home()
-task = Path(args.task_dir).expanduser().resolve()
-if not task.is_dir():
-    raise SystemExit(f'spawn-lead: not a directory: {task}')
-
-config = home / '.config/research'
+task = task_directory(args.task_dir)
+config = CONFIG
 env_file = config / 'env'
 environment = env_file.read_text().strip() if env_file.exists() else 'cli-plain'
 if environment not in ('cli-herdr', 'cli-plain', 'app'):
@@ -49,13 +47,14 @@ if kind not in ('claude', 'codex'):
 model = roles.get('model') if kind == roles.get('kind', 'claude') else None
 effort = roles.get('effort') if kind == roles.get('kind', 'claude') else None
 
-prompt = (f'Lead task: {task}\n'
-          f'Read the task card in {task} (README.md, or AGENTS.md if present) and the root AGENTS.md, then prepare the confirmation '
-          'version of the alignment (question, method, primary metric, scope, stopping '
-          'conditions, authorized files, acceptance commands) and wait for the user to '
-          'confirm before executing. If the task card explicitly says pre-authorized, proceed within its authorized scope without another alignment confirmation.')
+model = None if model == 'default' else model
+prompt = bootstrap('lead', task) + (
+    f'读取 {task / "README.md"}，确认问题、方法、指标、范围、停止条件、可写文件和验收命令。'
+    '授权和验收要求已明确时直接执行；仅对缺失且影响执行的关键事项询问，避免重复确认。')
 
 if environment == 'cli-herdr':
+    if os.environ.get('HERDR_ENV') != '1':
+        raise SystemExit('spawn-lead: run inside Herdr or select cli-plain')
     herdr = shutil.which('herdr')
     if not herdr:
         raise SystemExit('spawn-lead: herdr not found; install it with bin/install-component herdr')

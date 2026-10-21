@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Start a dispatcher in this workspace, or print its bootstrap prompt."""
+import argparse
+import os
+from _workspace import ROOT, bootstrap
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--kind', choices=('claude', 'codex'), default='claude')
+parser.add_argument('--print', action='store_true', dest='print_only')
+args = parser.parse_args()
+prompt = bootstrap('dispatcher')
+if args.print_only:
+    print(prompt)
+else:
+    os.chdir(ROOT)
+    os.execvp(args.kind, [args.kind, prompt])

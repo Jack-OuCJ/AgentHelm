@@ -16,9 +16,12 @@ args = parser.parse_args()
 if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', args.slug):
     parser.error('slug must be kebab-case')
 root = Path(__file__).resolve().parent.parent
-config = Path.home() / '.config/research'
+from _workspace import CONFIG as config, owned
+
 env = config / 'env'
 if env.exists() and env.read_text().strip() == 'cli-herdr':
+    if os.environ.get('HERDR_ENV') != '1':
+        parser.error('run inside Herdr, or select cli-plain in .agenthelm/config/env')
     listing = json.loads(subprocess.check_output(['herdr', 'agent', 'list'], text=True))
     agents = listing['result'] if isinstance(listing, dict) else listing
     if isinstance(agents, dict):
@@ -26,7 +29,7 @@ if env.exists() and env.read_text().strip() == 'cli-herdr':
     count = sum(agent['name'].startswith('lead-') for agent in agents)
     if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '4')):
         parser.error('Lead concurrency limit reached')
-experiments = root / 'experiments'
+experiments = owned(root / 'experiments')
 experiments.mkdir(exist_ok=True)
 numbers = [int(match[1]) for parent in (experiments, experiments / 'archive', root / 'archive')
            if parent.exists() for path in parent.iterdir()

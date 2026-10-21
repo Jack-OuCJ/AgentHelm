@@ -11,3 +11,12 @@ EXPERIMENTS.md
 *.before-agenthelm
 .compactions
 .notion-pending
+
+# Local workspace configuration and generated runtime files
+.agenthelm/
+.claude/
+experiments/
+cards/
+reports/
+rules/
+rules-extra.md

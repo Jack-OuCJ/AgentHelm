@@ -10,12 +10,7 @@
 
 ## Installing software
 
-Applies to every session, on any platform.
-- When a tool or dependency is missing, install it without asking, using the package manager and install location named in `local.md` (a user-level one if none is named). Agent skills and plugins follow their own rules below.
-- Project dependencies still go into the project's virtual environment; they are removed with the project and need no log entry.
-- For everything installed outside a project, append one line to the install log named in `local.md` (default `~/.config/research/installs.log`): date, install command, why (task), uninstall command.
-- In your reply, list what you installed under a line starting with **Installed:**, with the uninstall command for each. A delegated executor puts this list in its reply; the main session passes it on to the user.
-- Only operations that need an administrator password (sudo without passwordless access) are written as commands for the user to run.
+Install project dependencies only in this workspace or the task virtual environment. Do not install user-wide tools, skills or plugins without explicit authorization. Follow the user's existing shared rules.
 
 ## Research cards
 
@@ -36,4 +31,4 @@ Pick one browser automation tool per platform, run one browser at a time, and cl
 
 ## Local data
 
-Keep credentials and machine-specific facts out of shared rules; they belong in `~/.config/research/` and `~/.claude/local.md`.
+Keep credentials and machine-specific facts out of shared rules; they belong in `.agenthelm/config/` and `.agenthelm/config/local.md`.

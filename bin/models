@@ -9,7 +9,8 @@ import subprocess
 from _toml import loads
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG = Path.home() / '.config/research/roles.toml'
+from _workspace import CONFIG as WORKSPACE_CONFIG, write
+CONFIG = WORKSPACE_CONFIG / 'roles.toml'
 MARKDOWN = CONFIG.with_name('models.md')
 
 
@@ -21,8 +22,9 @@ def select(config, role):
 def command(config, candidate, research=False):
     provider, model, *effort = candidate.split(':')
     spec = config['commands'][provider]
-    return spec['template'].format(model=shlex.quote(model), effort=shlex.quote(effort[0]) if effort else '',
-                                   research_flags=spec.get('research_flags', '') if research else '')
+    template = spec.get('default_template', provider) if model == 'default' else spec['template']
+    return template.format(model=shlex.quote(model), effort=shlex.quote(effort[0]) if effort else '',
+                                   research_flags=spec.get('research_flags', '') if research else '').strip()
 
 
 def validate(config):
@@ -33,7 +35,7 @@ def validate(config):
             parts = candidate.split(':')
             if len(parts) not in (2, 3) or not all(parts) or parts[0] not in config['providers']:
                 raise ValueError('Invalid candidate: ' + candidate)
-            if '{effort}' in config['commands'][parts[0]]['template'] and len(parts) != 3:
+            if parts[1] != 'default' and '{effort}' in config['commands'][parts[0]]['template'] and len(parts) != 3:
                 raise ValueError(f'Role {name}: candidate {candidate} requires effort for its command template')
             research = role.get('research', False)
             for mode in (True, False) if research == 'split' else (research,):
@@ -53,7 +55,7 @@ def generate(config):
                             if role.get('research') == 'split' else code(role.get('research', False)))
         commands = '<br>'.join(commands)
         lines.append(f'| {name} ({role["desc"]}) | {role["tier"]} | {"<br>".join(active) or "unavailable"} | {commands or "—"} |')
-    MARKDOWN.write_text('\n'.join(lines) + '\n')
+    write(MARKDOWN, '\n'.join(lines) + '\n')
 
 
 def main():

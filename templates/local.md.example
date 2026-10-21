@@ -1,60 +1,12 @@
-# Local machine facts
+# 本机工作区约定
 
-<!-- Customize for your environment. Copy to ~/.claude/local.md (never into a repository), fill in measured values,
-     delete sections that do not apply, then run bin/kb sync-agents. Shared rules say "see local.md" for everything below. -->
+复制到当前工作区 `.agenthelm/config/local.md`，仅写入非敏感的机器约定。
 
-## Machine
-
-- OS: <measured, e.g. from skills/research-setup/scripts/hardware>
-- Logical CPUs: <measured>
-- Memory: <measured total>; swap: <measured>
-- GPU: <present / none; do not guess>
-- Package manager: <e.g. Homebrew or mise (user-level), or apt only with passwordless sudo>
-- Install location: <e.g. ~/.local/bin, ~/.local/opt, or the Homebrew prefix>
-- Passwordless sudo: <yes / no; if no, write commands that need sudo for the user to run>
-- Install log: <default ~/.config/research/installs.log>
-
-## Time
-
-- Report times in: <your timezone, e.g. UTC or Europe/Berlin>. Machine clock is in: <its timezone, if different>.
-- To get the current time in your zone: <command, e.g. TZ=<zone> date>
-
-## Concurrency and resources
-
-- Memory measure that gates parallel tests, builds and browsers: <recommended: real anonymous memory of your user, not "available" memory that includes reclaimable cache>
-  - Linux with cgroup v2: the `anon` line of `/sys/fs/cgroup/<your user slice>/memory.stat`; macOS: "App Memory" in Activity Monitor or `vm_stat`.
-  - Throttle new parallel work above <about 50-60% of your memory limit>; your user is throttled at <limit> and killed at <limit>, if a limit exists.
-- Read-only delegation has no fixed fan-out; each extra agent session costs about <measured MB>.
-- Build parallelism: <e.g. -j<N>; recommended: about half the logical CPUs, fewer on a shared machine>. Lower priority for builds and tests: <e.g. nice -n 10>.
-- Long commands get a timeout: <default seconds>.
-- Services not to touch: <names, e.g. a proxy or VPN you depend on>.
-- Process hygiene: kill by PID after checking start time (`ps -eo pid,etime,args`); avoid pattern kills that can match your own shell.
-- Scheduled jobs: <none / list the jobs that exist on purpose, e.g. the weekly rules sync>.
-
-## Files and storage
-
-- Must survive a restart or another day (evidence, screenshots, artifacts): the task directory.
-- Intermediate files during a session: <session scratch directory, or /tmp>; delete when the session ends. Shared scratch: delete only what you created.
-- Read once and discard: /tmp.
-- User-level software: <e.g. ~/.local/bin>; language runtimes: <version manager>; project dependencies: <per-project virtual environment>; global tools may be installed, but log them (see "Installing software" in the executor conventions).
-
-## Browser checks
-
-- Tool: <one per platform; Linux/headless: a CLI browser-automation tool driving a local Chrome or Chromium; macOS: a desktop browser agent or the same CLI tool>
-- Setup: <executable path, socket or profile directory, headless or not>
-- Notes: <e.g. no GPU, so WebGL is slow; measure frame rate on real hardware>
-
-## Notifications and boards
-
-- How a Lead reaches the dispatcher: <built-in cross-session messaging / herdr agent prompt / STATUS only>
-- How the dispatcher reaches the user: <terminal / app notification / phone push / none>
-- Board: <local BOARD.md / Notion (credentials in ~/.config/research/notion.env)>
-
-## Accounts and transfers
-
-- Git hosting CLI: <e.g. gh, logged in as your account>
-- File exchange with your other devices: <inbox/outbox directories or none>
-
-## Roles
-
-Do not list models here. Copy `templates/roles.toml.example` to `~/.config/research/roles.toml`, edit it, and run `bin/models`; it writes `~/.config/research/models.md`, which `bin/kb sync-agents` appends after this file.
+- 操作系统、时区：填写实测信息。
+- CPU、内存：用 `skills/research-setup/scripts/hardware` 查看。
+- 并发：Lead 上限默认 4；高资源构建和浏览器串行。
+- 安装：仅项目虚拟环境或本工作区；全局安装需明确授权。
+- 浏览器和开发工作流：遵守用户既有全局规则与专用 skill。
+- 通知：本地 BOARD.md/STATUS；没有显式授权不发送外部消息。
+- 模型：另见项目 roles.toml，修改后运行 bin/models。
+- 本适配不是环境隔离，现有全局规则和 skills 仍可能被 CLI 读取。

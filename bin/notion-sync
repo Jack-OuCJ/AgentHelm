@@ -2,12 +2,13 @@
 """Mirror local STATUS and conclusions to an optional Notion database."""
 import json
 from pathlib import Path
+from _workspace import CONFIG
 import re
 import sys
 import urllib.parse
 import urllib.request
 
-config = Path.home() / '.config/research/notion.env'
+config = CONFIG / 'notion.env'
 if not config.exists():
     raise SystemExit(0)
 values = dict(line.split('=', 1) for line in config.read_text().splitlines()
@@ -64,7 +65,7 @@ def sync(task):
             conclusion = re.split(r'(?m)^#{1,2} ', body[headings[-1].end():], maxsplit=1)[0].strip()
     properties['Conclusion'] = {'rich_text': text(conclusion)}
     filters = [{'property': 'Name', 'title': {'equals': name}}]
-    identity = Path.home() / '.config/research/machine'
+    identity = CONFIG / 'machine'
     if identity.exists():
         schema = api('GET', f'databases/{database}')['properties'].get('Machine')
         if schema:
