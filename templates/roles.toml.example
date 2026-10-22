@@ -15,6 +15,21 @@ default_template = 'codex exec {research_flags}'
 research_flags = ''
 check = 'codex --version'
 
+# App 模型与 CLI candidates 独立。字段缺省时逐字段回退公共默认，再回退目标 App 原生默认。
+# default 明确重置继承；不采用 Dispatcher 当前设置。实际模型及强度组合由宿主验证。
+[app.defaults.ccd]
+model = "default"
+effort = "default"
+
+[app.defaults.codex]
+model = "default"
+effort = "default"
+
+# 需要覆盖时使用角色的 App 表；model 与 effort 可以分别省略。
+# [roles.lead.app.codex]
+# model = "your-model-id"
+# effort = "your-supported-effort"
+
 [roles.lead]
 desc = "任务组长"
 tier = "Strategist"
