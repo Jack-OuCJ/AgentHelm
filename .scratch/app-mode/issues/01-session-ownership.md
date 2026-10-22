@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 公开 CLI 支持注册、查询、能力登记；冲突不抢占。
 - [ ] 原子状态与锁防止并发注册；路径逃逸和损坏状态明确报错。
