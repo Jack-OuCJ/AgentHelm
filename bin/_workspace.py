@@ -45,10 +45,25 @@ def task_directory(path):
     return path
 
 
+def runtime_environment():
+    path = CONFIG / 'env'
+    environment = path.read_text().strip() if path.exists() else 'cli-plain'
+    if environment not in ('cli-herdr', 'cli-plain', 'app'):
+        raise SystemExit(f'workspace: unknown environment in {path}: {environment}')
+    instructions = ROOT / 'rules' / f'env-{environment}.md'
+    if not instructions.is_file():
+        raise SystemExit(f'workspace: missing environment instructions: {instructions}; '
+                         f'run {ROOT / "bin/install-rules"}')
+    return environment, instructions
+
+
 def bootstrap(role, task=None):
+    environment, instructions = runtime_environment()
     return (f'工作区根目录：{ROOT}\n当前角色：{role}\n'
             f'开始前读取 {ROOT / "AGENTS.md"} 和 '
             f'{ROOT / "skills/agenthelm-workflow/SKILL.md"}，按角色加载对应规则。\n'
             + (f'任务目录：{task}\n' if task else '')
+            + f'当前运行环境：{environment}；环境说明来源：{instructions}\n'
+            + instructions.read_text().strip() + '\n'
             + '沿用用户既有全局规则和权限；只操作当前任务明确授权的文件。\n'
             + '不得修改用户 HOME 中的规则、skills、插件、配置或凭据；不得绕过权限审批。\n')

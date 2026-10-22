@@ -7,6 +7,14 @@ description: 在 AgentHelm 工作区创建或调度研究任务、启动 Lead、
 
 先读取工作区根目录的 AGENTS.md。用户的全局规则、明确授权和当前宿主限制继续有效。
 
+开始任务或恢复上下文时读取 `.agenthelm/config/env`，按其值只加载一份环境说明；启动提示已包含该说明正文时无需重复读取。配置文件不存在时使用 `cli-plain`；值不在下表中时，报告配置错误并停止启动，不猜测环境，也不改写配置。生效规则缺失时，报告缺失路径并提示运行 `bin/install-rules`，停止启动，不回退读取模板。
+
+| env | 环境说明 |
+|---|---|
+| `cli-herdr` | `rules/env-cli-herdr.md` |
+| `cli-plain` | `rules/env-cli-plain.md` |
+| `app` | `rules/env-app.md` |
+
 仅加载当前需要的一项：
 
 | 当前任务 | 读取 |

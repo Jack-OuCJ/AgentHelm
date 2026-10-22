@@ -6,7 +6,7 @@ Optional .agenthelm/config/roles key=value lines: kind, model, effort.
 import argparse
 import json
 import os
-from _workspace import CONFIG, task_directory, bootstrap
+from _workspace import CONFIG, task_directory, bootstrap, runtime_environment
 from pathlib import Path
 import re
 import shutil
@@ -23,10 +23,7 @@ args = parser.parse_args()
 
 task = task_directory(args.task_dir)
 config = CONFIG
-env_file = config / 'env'
-environment = env_file.read_text().strip() if env_file.exists() else 'cli-plain'
-if environment not in ('cli-herdr', 'cli-plain', 'app'):
-    raise SystemExit(f'spawn-lead: unknown environment in {env_file}: {environment}')
+environment, _ = runtime_environment()
 
 roles = {}
 role = 'lead_important' if args.important else 'lead'

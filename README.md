@@ -48,6 +48,8 @@ Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动�
 
 `bin/spawn-lead`、`bin/dispatch` 和 `bin/run-executor` 都会显式传递根规则、路由和角色路径。原生子代理也需在委派中写出这些信息；仅在项目目录启动不代表 skill 正文已加载。
 
+启动与上下文恢复提示会按 `.agenthelm/config/env` 注入对应的 `rules/env-*.md` 正文。手动开启的会话通过工作流入口按相同映射读取；配置文件不存在时使用 `cli-plain`，未知值会报错，生效说明缺失会提示运行 `bin/install-rules`。Dispatcher 分派任务、Lead 分层执行时读取 `rules/claude-global.md`；Executor 读取 `rules/executor-agents.md`。
+
 ## 模型分配
 
 首次配置中，Claude 负责主会话、Lead、fact/chore/writing/visual/aesthetic；Codex 负责 hard/simplify。所有候选均为 `default`，复用各 CLI 的现有模型、账号与权限。因此目前分角色，但尚未按价格档位分配不同模型。
@@ -120,6 +122,8 @@ python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-
 ```
 
 工作区配置和任务内容被 Git 忽略。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
+
+协作、执行者、环境和研究规则的来源在 templates。修改模板后运行 `bin/install-rules`，更新本工作区的 `rules/claude-global.md`、`rules/executor-agents.md`、三份 `rules/env-*.md`、`rules/research-workflow.md` 和根目录 `rules-extra.md`，并同步根目录入口。初始化时生成全部环境说明，运行时按当前 env 选择一份；修改模板后须同步才会影响后续加载。配置示例初始化、任务卡生成、规则校验和测试仍可读取 templates。
 
 整体移动 checkout 后，脚本通过自身位置、项目 SessionStart 钩子通过会话项目目录识别新根目录，配置与技能链接保留相对关系。`.agenthelm/config/install-dir` 相对于该配置文件所在目录。委派提示中的绝对路径在运行时重新计算，不固化到入口配置。全局配置基线和历史恢复快照属于原始证据，保留其中的历史路径；第三方技能中的容器、系统工具路径按各自平台语义使用。
 

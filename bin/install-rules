@@ -6,7 +6,12 @@ import subprocess
 for directory in ('experiments', 'cards', 'reports', 'rules'):
     owned(ROOT / directory).mkdir(exist_ok=True)
 write(CONFIG / 'install-dir', '../..\n')
-for source, destination in (('research-AGENTS.md', 'rules/research-workflow.md'),
+for source, destination in (('claude-global.md', 'rules/claude-global.md'),
+                            ('executor-agents.md', 'rules/executor-agents.md'),
+                            ('env-cli-herdr.md', 'rules/env-cli-herdr.md'),
+                            ('env-cli-plain.md', 'rules/env-cli-plain.md'),
+                            ('env-app.md', 'rules/env-app.md'),
+                            ('research-AGENTS.md', 'rules/research-workflow.md'),
                             ('research-extra.md', 'rules-extra.md')):
     write(ROOT / destination, (ROOT / 'templates' / source).read_text())
 subprocess.run([str(ROOT / 'bin/kb'), 'sync-agents'], check=True)

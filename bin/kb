@@ -127,7 +127,7 @@ def lint(brief=False):
             continue
         for number, line in enumerate(path.read_text().splitlines(), 1):
             for code in re.findall(r'`([^`]+)`', line):
-                if code.startswith(('bin/', 'templates/')):
+                if code.startswith(('bin/', 'templates/', 'rules/')):
                     target = code.split()[0]
                     if any(c in target for c in '<>*?['):
                         continue

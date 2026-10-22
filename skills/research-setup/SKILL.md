@@ -11,7 +11,7 @@ description: 初始化或调整当前 AgentHelm 工作区、选择和安装领�
    首次初始化时按下方流程一次询问领域技能的安装范围、注册方式和注册目标。复用用户已明确选择的范围；升级时保留已安装技能，不默认扩大全库。用户只要求安装领域技能或切换注册方式时直接进入下方流程，无需重新部署。
 2. 在工作区根目录运行 `python3 skills/research-setup/scripts/deploy <当前工作区绝对路径> --role dispatcher --env cli-herdr`。其他位置需先独立克隆；不复制或重写现有全局 skills。
 3. 配置保存在 `.agenthelm/config/`。编辑 roles.toml 后运行 `bin/models`；default 沿用各 CLI 默认设置，分档模型需用户另行指定。
-4. 本地入口 AGENTS.md/CLAUDE.md 来自 `templates/workspace-*.md`。修改模板再运行 `bin/kb sync-agents`；已有非本工具生成的入口文件必须手动合并。
+4. 本地入口 AGENTS.md/CLAUDE.md 来自 `templates/workspace-*.md`。修改入口模板再运行 `bin/kb sync-agents`；已有非本工具生成的入口文件必须手动合并。协作、执行者、环境和研究规则由 `bin/install-rules` 从 templates 生成到生效位置；修改这些模板后运行该命令同步。运行时读取 `rules/` 下的生效文件及根目录 `rules-extra.md`；配置示例初始化和任务卡生成仍读取 templates。
 5. `.claude/settings.json` 的 SessionStart 钩子只属于本工作区；`skills/research-setup/scripts/merge-hooks` 保留其他本地设置、不写 HOME，并将旧的固定绝对路径钩子迁移为运行时定位。脚本按自身位置、钩子按会话项目目录识别根目录；安装记录和配置引用使用相对路径，整体移动 checkout 后无需重装。全局配置基线与历史快照中的路径保留原始证据。
 6. 验证 `python3 skills/research-setup/scripts/smoke.py`、`bin/kb lint`、`bin/models check`。有基线时运行 `bin/global-config-check`。
 7. 不配置 cron、全局插件、私有规则远端或外部通知；按需加载全局已有 skills。不要以隔离环境为由修改 HOME、CODEX_HOME 或用户已有配置。

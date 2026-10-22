@@ -22,12 +22,11 @@ env = config / 'env'
 if env.exists() and env.read_text().strip() == 'cli-herdr':
     if os.environ.get('HERDR_ENV') != '1':
         parser.error('run inside Herdr, or select cli-plain in .agenthelm/config/env')
-    listing = json.loads(subprocess.check_output(['herdr', 'agent', 'list'], text=True))
-    agents = listing['result'] if isinstance(listing, dict) else listing
-    if isinstance(agents, dict):
-        agents = agents['agents']
-    count = sum(agent['name'].startswith('lead-') for agent in agents)
-    if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '4')):
+    # herdr agent list has no agent names; spawn-lead labels each Lead tab "lead-<task>".
+    listing = json.loads(subprocess.check_output(['herdr', 'tab', 'list'], text=True))
+    tabs = listing['result']['tabs']
+    count = sum(tab.get('label', '').startswith('lead-') for tab in tabs)
+    if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '10')):
         parser.error('Lead concurrency limit reached')
 experiments = owned(root / 'experiments')
 experiments.mkdir(exist_ok=True)

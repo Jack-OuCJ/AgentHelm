@@ -2,7 +2,7 @@
 
 1. 读取任务 README、STATUS 和 `memory/MEMORY.md`（存在时）。任务授权充分时继续执行；目标、指标或预算有关键缺失时才询问，不重复索要已有授权。
 2. 做实验、复现、选型比较时读取 `rules/research-workflow.md` 的适用小节；重要任务再读 `rules-extra.md` 的严格模式。普通开发不套用实验抽样要求。
-3. 需要分层执行时读取 `templates/claude-global.md` 的角色表与委派约定；专用 skill 按任务需要加载。
+3. 需要分层执行时读取 `rules/claude-global.md` 的角色表与委派约定；专用 skill 按任务需要加载。
 4. 使用 `.agenthelm/config/models.md` 选择角色命令。默认模型是各 CLI 的现有默认；若要分价格档位，先在项目 roles.toml 明确配置，再运行 `bin/models`。
 5. 对 CLI 执行者可用 `bin/run-executor <task-dir> --role fact < brief.txt`；脚本会附加工作区入口和边界。brief 仍须列出可写文件、输出路径与验收命令。原生子代理同样显式传递。
 6. executor 不再创建下层代理。不要把全局安装、修改规则、推送或发消息的权限隐含在任务里。
