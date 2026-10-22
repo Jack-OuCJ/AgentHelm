@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 
+from _app_requests import prepare, result
 from _app_sessions import record_capabilities, register, require_dispatcher, transaction
 
 
@@ -15,12 +16,24 @@ def main():
         subparser.add_argument('--session', required=True)
         if command == 'register':
             subparser.add_argument('--entry', choices=('app.codex', 'app.ccd'), required=True)
+    preparing = commands.add_parser('prepare')
+    preparing.add_argument('--session', required=True)
+    preparing.add_argument('--operation', choices=('create', 'executor'), required=True)
+    preparing.add_argument('--task', required=True)
+    receiving = commands.add_parser('result')
+    receiving.add_argument('--session', required=True)
+    receiving.add_argument('--request', required=True)
     args = parser.parse_args()
+    payload = json.load(sys.stdin) if args.command in ('prepare', 'result', 'capabilities') else None
     with transaction(readonly=args.command == 'show') as state:
         if args.command == 'register':
             output = register(state, args.session, args.entry)
         elif args.command == 'capabilities':
-            output = record_capabilities(state, args.session, json.load(sys.stdin))
+            output = record_capabilities(state, args.session, payload)
+        elif args.command == 'prepare':
+            output = prepare(state, args.session, args.operation, args.task, payload)
+        elif args.command == 'result':
+            output = result(state, args.session, args.request, payload)
         else:
             require_dispatcher(state, args.session)
             output = state
