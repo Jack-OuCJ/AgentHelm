@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 原生 Lead 创建与 Executor 委派。
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 读取、等待、追加与恢复不重建会话，不把 idle 当 done。
 - [ ] 追加要求最新观察且保留实际模型，人工介入后不重放旧消息。

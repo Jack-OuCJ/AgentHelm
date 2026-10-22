@@ -45,9 +45,40 @@ def task_directory(path):
     return path
 
 
-def runtime_environment():
+def runtime_entry(entry=None, session=None, task=None):
+    """Explicit session bindings take precedence over workspace CLI defaults."""
+    from _app_sessions import ENTRIES, load_state, session_id
+    state = load_state()
+    if session is not None:
+        session_id(session)
+        binding = state['sessions'].get(session)
+        if binding is None:
+            raise ValueError('unknown session binding; register the App Dispatcher explicitly')
+        if entry is not None and entry != binding['entry']:
+            raise ValueError('entry conflicts with bound session')
+        return binding['entry']
+    if task is not None and str(task) in state['tasks']:
+        raise ValueError('App task requires an explicitly bound --session')
+    if entry is not None:
+        if entry not in (*ENTRIES, 'cli.claude', 'cli.codex'):
+            raise ValueError('unknown runtime entry')
+        if entry in ENTRIES:
+            raise ValueError('App entry requires an explicitly bound --session')
+        return entry
+    environment, _ = runtime_environment()
+    if environment == 'app':
+        raise ValueError('App environment requires an explicitly bound --session')
+    return None
+
+
+def runtime_environment(entry=None, session=None):
+    if session is not None:
+        entry = runtime_entry(entry, session)
     path = CONFIG / 'env'
-    environment = path.read_text().strip() if path.exists() else 'cli-plain'
+    environment = ('app' if entry and entry.startswith('app.') else
+                   path.read_text().strip() if path.exists() else 'cli-plain')
+    if entry and entry.startswith('cli.') and environment == 'app':
+        environment = 'cli-plain'
     if environment not in ('cli-herdr', 'cli-plain', 'app'):
         raise SystemExit(f'workspace: unknown environment in {path}: {environment}')
     instructions = ROOT / 'rules' / f'env-{environment}.md'
@@ -57,8 +88,8 @@ def runtime_environment():
     return environment, instructions
 
 
-def bootstrap(role, task=None):
-    environment, instructions = runtime_environment()
+def bootstrap(role, task=None, entry=None, session=None):
+    environment, instructions = runtime_environment(entry, session)
     return (f'工作区根目录：{ROOT}\n当前角色：{role}\n'
             f'开始前读取 {ROOT / "AGENTS.md"} 和 '
             f'{ROOT / "skills/agenthelm-workflow/SKILL.md"}，按角色加载对应规则。\n'

@@ -48,6 +48,7 @@ class WorkspaceTests(unittest.TestCase):
         stub = ("#!" + sys.executable + "\nimport json,os,sys\n"
                 "with open(os.environ['TEST_LOG'],'a') as f: f.write(json.dumps({'cli':os.path.basename(sys.argv[0]),'argv':sys.argv[1:],'cwd':os.getcwd()},ensure_ascii=False)+'\\n')\n"
                 "if sys.argv[1:3] == ['tab','create']: print(json.dumps({'result':{'root_pane':{'pane_id':'fake-pane'}}}))\n"
+                "elif sys.argv[1:3] == ['tab','list']: print(json.dumps({'result':{'tabs':[]}}))\n"
                 "elif sys.argv[1:3] == ['agent','list']: print(json.dumps({'result':{'agents':[]}}))\n")
         for name in ('herdr', 'claude', 'codex'):
             target = self.fakebin / name

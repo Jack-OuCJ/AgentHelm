@@ -22,14 +22,48 @@ class RuntimeRulesTests(unittest.TestCase):
                 template = self.root / 'templates' / instructions.name
                 marker = f'未同步的环境模板修改：{environment}'
                 template.write_text(template.read_text() + '\n' + marker + '\n')
+                if environment == 'app':
+                    previous_commands = self.log.read_text() if self.log.exists() else ''
+                    self.run_cmd('bin/spawn-lead', task, ok=False)
+                    self.run_cmd('bin/run-executor', task, '--print', input='只读任务目录。', ok=False)
+                    self.run_cmd('bin/app-session', 'register', '--entry', 'app.codex', '--session', 'dispatcher')
+                    capabilities = {name: {'available': True, 'source': 'fake native host'} for name in
+                                    ('create', 'read', 'wait', 'followup', 'model', 'effort',
+                                     'verify_model', 'native_executor')}
+                    capabilities['verify_model']['fields'] = ['model', 'effort']
+                    capabilities['model']['values'] = ['native-model']
+                    capabilities['effort']['combinations'] = {'native-model': ['high']}
+                    self.run_cmd('bin/app-session', 'capabilities', '--session', 'dispatcher',
+                                 input=json.dumps({'entry': 'app.codex', 'source': 'fake host inventory',
+                                                   'capabilities': capabilities}))
+                    parameters = json.dumps({'defaults': {'model': 'native-model', 'effort': 'high',
+                                                          'source': 'fake App settings', 'evidence': 'readback'}})
+                    (task / 'README.md').write_text('# Read task directory')
+                    request = json.loads(self.run_cmd('bin/spawn-lead', task, '--session', 'dispatcher',
+                                                     '--app-params', parameters).stdout)
+                    lead = request['prompt']
+                    self.run_cmd('bin/app-session', 'result', '--session', 'dispatcher', '--request', request['id'],
+                                 input=json.dumps({'request_id': request['id'], 'owner_epoch': 1,
+                                                   'entry': 'app.codex', 'status': 'created', 'session': 'lead',
+                                                   'workspace': str(self.root), 'cwd': str(task),
+                                                   'visible': True, 'independent': True, 'executed': True,
+                                                   'model': 'native-model', 'effort': 'high',
+                                                   'evidence': {name: 'fake native observation' for name in
+                                                                ('session', 'workspace', 'cwd', 'visible',
+                                                                 'independent', 'executed', 'model', 'effort')}}))
+                    executor = json.loads(self.run_cmd('bin/run-executor', task, '--session', 'lead',
+                                                      '--app-params', parameters, input='只读任务目录。').stdout)['prompt']
+                    self.assertEqual(self.log.read_text() if self.log.exists() else '', previous_commands)
+                else:
+                    executor = self.run_cmd('bin/run-executor', task, '--print', input='只读任务目录。').stdout
+                    lead = self.run_cmd('bin/spawn-lead', task).stdout
                 contexts = [
                     self.run_cmd('bin/dispatch', '--print').stdout,
-                    self.run_cmd('bin/run-executor', task, '--print', input='只读任务目录。').stdout,
+                    executor,
                     self.run_cmd('bin/lead-reload', task, 'resume').stdout,
                     self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd': str(self.root)})).stdout,
                     self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd': str(task)})).stdout,
                 ]
-                lead = self.run_cmd('bin/spawn-lead', task).stdout
                 if environment == 'cli-herdr':
                     commands = [json.loads(row) for row in self.log.read_text().splitlines()]
                     lead = [row['argv'][-1] for row in commands
