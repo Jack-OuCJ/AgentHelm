@@ -4,7 +4,7 @@ The user describes what to verify. The Lead aligns once (see "Lead alignment"), 
 The default goal is a tendency or a measurable result, not precision. When the user calls a task important, switch to strict mode (`rules-extra.md`). Quick is not tiny: the scale must still answer the question. Save only where the saving cannot change the conclusion; otherwise the run is wasted.
 (Not the dispatcher or a Lead? Follow only your task card or delegation prompt; the coordination rules below do not apply. Handoff conventions are in the executor conventions.)
 
-Each rule lives in one place; elsewhere it is referenced. Before adding a rule, grep for the topic and edit the existing place. Machine facts and resource limits → `~/.claude/local.md`; delegation, review and optional skills → `rules/claude-global.md`; role-to-model mapping → `roles.toml` via `bin/models`; workflow and coordination → this file; strict mode, long runs, context handover, cleanup and conflicts → `rules-extra.md`; long-lived task-specific notes → the task's `memory/`.
+Each rule lives in one place; elsewhere it is referenced. Before adding a rule, grep for the topic and edit the existing place. Machine facts and resource limits → `.agenthelm/config/local.md`; delegation, review and optional skills → `rules/claude-global.md`; role-to-model mapping → `roles.toml` via `bin/models`; workflow and coordination → this file; strict mode, long runs, context handover, cleanup and conflicts → `rules-extra.md`; long-lived task-specific notes → the task's `memory/`.
 
 ## Workflow (default: quick tendency mode)
 
@@ -39,7 +39,7 @@ Each rule lives in one place; elsewhere it is referenced. Before adding a rule, 
 
 ## Resources
 
-- Machine limits, the memory measure that gates concurrency, build parallelism, untouchable services and where temporary files go are in `~/.claude/local.md`. Follow them; do not restate them here.
+- Machine limits, the memory measure that gates concurrency, build parallelism, untouchable services and where temporary files go are in `.agenthelm/config/local.md`. Follow them; do not restate them here.
 - Every command gets a timeout. Benchmarks run serially.
 - Spend the strongest tier on judgement, design, aesthetics and supervision; hand execution to cheaper roles when quality does not drop. Never shrink scale or downgrade the system under test to save quota.
 - When the system under test is itself an agent CLI, limit its turns, give it the smallest context directory, keep it from reading your global rules, and close its stdin. Debug prompts, gold labels, grading and cost extrapolation on a cheap stand-in first; results from the stand-in are debugging only, never the conclusion.

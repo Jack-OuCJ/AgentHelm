@@ -1,15 +1,4 @@
 #!/bin/sh
-# Weekly private rules sync; failures are shown on the next session start.
-set -eu
-[ -s "$HOME/.config/research/rules-remote" ] || exit 0
-bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-status=$HOME/.local/state/rules-sync.status
-mkdir -p "$(dirname -- "$status")"
-mkdir "$status.lock" 2>/dev/null || exit 0
-trap 'rmdir "$status.lock"' 0
-fail() { printf '%s %s\n' "$(date '+%F %H:%M')" "$1" > "$status"; exit 1; }
-out=$("$bin/rules-pull" 2>&1) || fail 'pull failed'
-case $out in *rules-pull:\ failed*|*rules-pull:\ skipped*) fail "$out" ;; esac
-out=$("$bin/rules-push" "Weekly rules sync: $(date +%F)" 2>&1) || fail "push failed: $(printf '%s' "$out" | tail -2 | tr '\n' ' ' | cut -c1-160)"
-"$bin/install-rules" >/dev/null 2>&1 || fail 'install failed'
-rm -f "$status"
+# Disabled in this workspace adaptation: no private remote or automatic commits/pushes.
+printf '%s\n' "rules-sync: disabled in workspace mode; edit project rules locally"
+exit 0

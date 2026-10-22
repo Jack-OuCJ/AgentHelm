@@ -1,148 +1,48 @@
 ---
 name: research-setup
-description: Interactively install or upgrade a local research workspace for Claude Code and Codex, including task tools, private rules, optional components and session context.
+description: 初始化或调整当前 AgentHelm 工作区、选择和安装领域 skills 时使用。管理项目配置和领域技能，保留用户全局配置与 skills。
 ---
-# Research setup
 
-Use the same skill for first installation and upgrades. Run scripts from this
-skill's directory; locate the kit root through the resolved skill path.
-Requirements: Linux or macOS, Python 3.9+, Git, POSIX sh and jq.
-When a requirement is missing, install it with the package manager named in `~/.claude/local.md` (a user-level one if none is named yet), append it to the install log named there (default `~/.config/research/installs.log`; date, command, reason, uninstall command) and list it under **Installed:** in the installation summary; hand anything that needs an administrator password to the user.
+# 配置工作区
 
-## 1. Ask once
+本仓库为 workspace-only 适配。不要使用上游全局安装步骤。
 
-Collect these choices together; reuse confirmed choices on subsequent runs:
-- Installation directory (default `~/research`, or the saved install-dir).
-- Environment, saved to `~/.config/research/env`: `cli-herdr` (terminal CLI, herdr recommended), `cli-plain` (terminal, no multiplexer) or `app` (Claude app / Codex app); Claude Code, Codex, or both. On upgrade, reuse the saved value unless the user changes it.
-- Role: dispatcher or ordinary executor, saved to `~/.config/research/role`; reuse the saved value on upgrade.
-- Board: Notion (recommended; local board is also kept) or local only as the fallback.
-- Optional components: herdr, ponytail, caveman, claude-hud, skills-library.
-- User-owned private rules repository URL, or none.
+1. 核对当前工作区和用户指定目录一致，检查 Git 改动，保留已有文件。
+   首次初始化时按下方流程一次询问领域技能的安装范围、注册方式和注册目标。复用用户已明确选择的范围；升级时保留已安装技能，不默认扩大全库。用户只要求安装领域技能或切换注册方式时直接进入下方流程，无需重新部署。
+2. 在工作区根目录运行 `python3 skills/research-setup/scripts/deploy <当前工作区绝对路径> --role dispatcher --env cli-herdr`。其他位置需先独立克隆；不复制或重写现有全局 skills。
+3. 配置保存在 `.agenthelm/config/`。编辑 roles.toml 后运行 `bin/models`；default 沿用各 CLI 默认设置，分档模型需用户另行指定。
+4. 本地入口 AGENTS.md/CLAUDE.md 来自 `templates/workspace-*.md`。修改入口模板再运行 `bin/kb sync-agents`；已有非本工具生成的入口文件必须手动合并。协作、执行者、环境和研究规则由 `bin/install-rules` 从 templates 生成到生效位置；修改这些模板后运行该命令同步。运行时读取 `rules/` 下的生效文件及根目录 `rules-extra.md`；配置示例初始化和任务卡生成仍读取 templates。
+5. `.claude/settings.json` 的 SessionStart 钩子只属于本工作区；`skills/research-setup/scripts/merge-hooks` 保留其他本地设置、不写 HOME，并将旧的固定绝对路径钩子迁移为运行时定位。脚本按自身位置、钩子按会话项目目录识别根目录；安装记录和配置引用使用相对路径，整体移动 checkout 后无需重装。全局配置基线与历史快照中的路径保留原始证据。
+6. 验证 `python3 skills/research-setup/scripts/smoke.py`、`bin/kb lint`、`bin/models check`。有基线时运行 `bin/global-config-check`。
+7. 不配置 cron、全局插件、私有规则远端或外部通知；按需加载全局已有 skills。不要以隔离环境为由修改 HOME、CODEX_HOME 或用户已有配置。
 
-Recommend herdr for terminal CLI users, but install it only if `cli-herdr` is chosen.
-Desktop applications (`app`) do not need herdr; they use their own sessions and projects. claude-hud is Claude Code only.
-Explain that optional plugins may enable upstream hooks; keep selection explicit.
-Never ask for secrets in chat. Notion credentials belong in the local config file.
+安装不会启动 agent。领域技能只按明确选择安装，不自动安装依赖、插件或全局 skills。
 
-## 2. Prepare and measure
+## 选择和安装领域 skills
 
-Create the selected directory and `~/.config/research`.
-Run `scripts/hardware` and show its actual output. Draft `~/.claude/local.md`
-using that output and `templates/local.md.example`; preserve existing user facts.
-Ask the user to confirm this concrete draft before writing it. Do not infer GPUs,
-service exclusions, permissions or safe workload limits from CPU/RAM alone.
-Save an existing differing local.md as local.md.before-agenthelm before writing.
+以下命令在当前 checkout 根目录执行。默认来源是 `K-Dense-AI/scientific-agent-skills`；脚本下载到 `.agenthelm/state/` 内的临时目录，退出时清理。只复制技能资源和许可证，不执行下载内容。
 
-## 3. Install or upgrade the kit
+1. 安装前先确认三个独立选择，合并成一次提问；复用本次对话中已明确的选择，不重复索要授权：
+   - 范围：跳过、指定技能、整个技能库。
+   - 注册方式：**领域路由、逐技能注册、仅入库**。不能把“全部安装”推断为逐技能注册。
+   - 注册目标：Claude、Codex 或两者；仅入库无需注册目标。不能默认注册到两者。
+   选择领域路由时，同时确认由用户指定分类还是按用途自动分组；用户已授权自动分组时直接执行。缺少注册方式或目标时，先列目录和候选，保持问题待答，不执行安装。
+2. 用户选择跳过时，不下载或安装。尚未确定技能名称时运行 `bin/install-component skills-library --list`，根据实际目录和用户任务给出候选名称和用途；查看目录不代表安装全库。输出包含来源提交，可用 `--ref <提交>` 固定后续预览和安装版本。
+3. 按已选择的注册方式预览并安装。逐技能注册使用 `--agent claude|codex|both`；领域路由或仅入库使用 `--agent none`。CLI 安装时必须显式传 `--agent`。例如为领域路由下载两个技能：
 
-Run `scripts/deploy <directory> --role dispatcher|executor --env cli-herdr|cli-plain|app`.
-On upgrade omit `--role` and `--env` to reuse the values saved in
-`~/.config/research/role` and `~/.config/research/env`; pass them only on first
-install or to change a saved choice.
-Use `--rules-remote <URL>` when selected, or `--rules-remote ''` for no private sync.
-The script copies bin, templates and this skill, then runs install-rules.
-It saves the directory and role under `~/.config/research` and registers the same
-skill directory for both agents. Other workspace files are retained.
-Existing global rule files are backed up before replacement.
+   ```sh
+   ./bin/install-component skills-library --skill scientific-writing --skill scientific-visualization --agent none --dry-run
+   ```
 
-Private rules are shallow-cloned to `~/.local/share/research-rules`; their rules/
-and templates/ overlay the kit. Edit private rules in that checkout, not the
-rendered installation. If already present, run installed `bin/rules-pull` to
-rebase with autostash and apply updates. Failed pulls retain local commits; resolve
-reported conflicts or a changed remote URL before pushing.
-Without a private repository, use the shipped templates.
-Run `bin/kb sync-agents` after any confirmed local.md change.
+   展示具体安装清单与项目注册位置。已有明确安装授权且预览无冲突时，使用相同参数去掉 `--dry-run` 执行，不重复索要确认。只有用户明确选择全库时才使用 `--all`。未给选择参数只列目录，不安装。切换已有技能的注册方式时，复用已安装文件，跳过下载。
+4. **选择领域路由时必须完成分组和注册，不能在入库后结束。** 根据已安装技能用途维护 `.agenthelm/config/routers.toml`，每个库内技能恰好归一个路由；保留现有用户分类，将新增技能补入匹配分组。建议 `library = "../../skills-library"`、`output = "../../.agenthelm/routers"`、`prefix = "route-"`，路径相对于配置文件，所有输出必须在当前工作区。路由使用中文用途描述，以文档相对链接指向技能的完整 SKILL.md，并注明相对于路由文件的真实目录（先解析符号链接），不依赖启动目录或机器绝对路径；不复制或改写技能文件。
+   按已选择的目标运行，例如注册两者：
 
-## 4. Install selected components
+   ```sh
+   ./bin/build-routers --agent both --dry-run
+   ./bin/build-routers --agent both
+   ```
 
-From the installed kit, run `bin/install-component <component>` only for selected
-components. For ponytail/caveman pass `--agent claude|codex|both` matching the choice.
-For claude-hud pass `--agent claude`; then run `/reload-plugins` and
-`/claude-hud:setup` inside Claude Code. If running in Codex, report that activation
-step as pending rather than claiming the HUD is active.
-Use `bin/install-component herdr --dry-run` to preview the latest-release URL.
-Already installed binaries/plugins are skipped; copied Codex and library skills
-are refreshed from shallow temporary checkouts, which are deleted afterward.
-The library is cataloged under skills-library/CATALOG.md. Generate routers only
-when the user supplies local `~/.config/research/routers.toml`; run
-`bin/build-routers` without configuration to see its schema. No classification
-table is shipped.
-Individual scientific skill dependencies remain user-selected.
-
-For Notion, have the user configure `~/.config/research/notion.env` locally with
-NOTION_DB and NOTION_TOKEN, restrict it to the user, and share the database with
-the integration. Use a dedicated single-source database with Name (title) and
-Status, Summary, Cost, Conclusion (rich text) properties. See the kit README.
-Do not write credentials into the kit or echo them. Without configuration, status
-updates stay local. Optionally save this machine's identity in
-`~/.config/research/machine`; it is written only when the database already has a
-Machine property (select or rich text). A completed task replaces the entire page
-body with its latest conclusion; use dedicated pages. Selecting local-only on an upgrade requires disabling an
-existing notion.env (rename it locally after explaining the effect).
-
-## 5. Merge the Claude SessionStart hook
-
-Run `scripts/merge-hooks` to display the proposed settings JSON. Explain that
-this affects Claude Code; Codex uses generated AGENTS.md and the board command.
-Show the diff against `~/.claude/settings.json` and ask for confirmation before
-running `scripts/merge-hooks --apply`. This helper uses jq, backs up existing
-settings before a change, preserves other settings/hooks and adds no duplicates.
-The hook injects the board for dispatchers and task context at task roots;
-no persistent watcher is started. If declined, leave settings untouched.
-Codex-only users should manually run `bin/lead-reload <task-dir>` at session start.
-
-## 5b. Weekly sync (only with a private rules repository)
-
-Ask whether to enable the weekly user-level cron job (default yes; no sudo). `bin/install-rules`
-registers `bin/rules-sync` idempotently (marker comment `# research-rules-sync`, minute offset
-derived from the hostname); set `RULES_CRON=0` to skip (the choice is saved in `~/.config/research/rules-cron`). A HOME under `/tmp` skips cron unless `RULES_CRON=1` is explicitly supplied.
-Cron needs non-interactive git auth:
-run `gh auth setup-git` (or configure a credential helper/SSH key) and confirm a push works
-without prompts. On failure rules-sync pushes nothing and writes one line to
-`~/.local/state/rules-sync.status`, which the session-start hook displays.
-
-## 5c. Optional role setup (every question skippable; skipped = write nothing)
-
-Start from `templates/roles.toml.example` and propose a local
-`~/.config/research/roles.toml`. Reuse an existing configuration on upgrade.
-Ask each item; omitted answers leave existing choices unchanged, and skipping
-role setup entirely writes nothing:
-1. Available providers and their on/off switches in `[providers]`.
-2. Each provider's command `template`, optional `research_flags` and optional
-   `check` under `[commands.<provider>]`. Supported command placeholders are
-   `{model}`, `{effort}`, `{research_flags}`. All CLI names come from these templates.
-3. For each role (lead, lead_important, hard, fact, chore, writing, visual, review,
-   simplify, aesthetic), confirm description, tier, candidate priority
-   (`provider:model[:effort]`), mode (`first` or `all`) and research setting
-   (`true`, `false` or `"split"`). Replace every example model for the user's environment.
-4. Aesthetic work may use a dedicated model, a user-selected design skill, or be skipped.
-
-Write only confirmed configuration; remove unchosen example roles/providers.
-Edit `roles.toml`, then run `bin/models` to validate it, generate the local
-`~/.config/research/models.md`, and run `bin/kb sync-agents` automatically.
-`bin/models get <role>` displays the selected candidate; `bin/models check`
-checks configured provider commands. A command template containing `{effort}`
-requires an effort value in every candidate that uses it.
-Legacy `~/.config/research/roles` (kind/model/effort) remains usable for Lead
-launches when roles.toml does not exist or omits the requested lead or
-lead_important role. Without either selection, spawn-lead defaults to Claude.
-Neither file belongs in a repository.
-On Python 3.9/3.10, configuration supports strings, booleans, integers, arrays
-and TOML tables; use Python 3.11+ for other TOML syntax.
-
-## 5d. Optional private scan terms
-
-Ask whether the user wants a local `~/.config/research/scrub-terms.txt` (one
-regular expression per line) for names, hosts and other private terms. They
-edit this locally; never collect private terms in chat or copy them into the
-kit. Skipping writes nothing. Without a list, scrub-check warns and checks
-built-in secret patterns only. Run `bin/scrub-check <installation-directory>`.
-
-## 6. Verify and report
-
-Run installed `bin/kb index`, `bin/kb lint`, `bin/board`, and
-`python3 skills/research-setup/scripts/smoke.py` from the kit root.
-Smoke tests use a temporary HOME, not the user's configuration.
-Report installation location, selected components, completed checks and any
-pending activation/configuration. Never report unrun checks as passed.
-Stop after two failed attempts at a step or when a design decision is needed.
+   用户选择将已有逐技能注册切换成路由时，以上两个命令均增加 `--replace-leaf-links`。该选项只移除安装清单管理、且仍精确指向本工作区技能库的项目链接；先检查全部冲突，再生成和注册路由，最后移除旧链接。`--agent none` 本身不会移除旧链接。
+5. 技能资源位于 `skills-library/<名称>/`，许可证和目录位于 `skills-library/`；来源、版本和文件哈希保存在 `.agenthelm/state/skills-library.json`。Claude 项目入口为 `.claude/skills/`，Codex 为 `.agents/skills/`。仅入库不创建入口；领域路由只暴露路由入口，按需读取叶子技能。已有手写目录、注册冲突或技能本地修改先报告并保留，不强制覆盖。离线来源使用 `--source <本地库目录>`，只读来源，需包含技能及根 LICENSE 文件。
+6. 验证库中技能文件哈希、分类完整且不重复、项目入口精确指向本工作区。切换路由时确认本次旧链接已移除、其他项目入口保留。运行 `bin/kb lint`；有全局配置基线时运行 `bin/global-config-check`。报告技能数、路由数、实际注册方式和未安装依赖，不把预览或仅入库报告为路由注册完成。CLI 未刷新技能发现列表时，在本工作区新开会话验证。

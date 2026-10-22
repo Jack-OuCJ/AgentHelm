@@ -6,23 +6,30 @@ import subprocess
 import sys
 
 root = Path(__file__).resolve().parent.parent
-home = Path.home()
+from _workspace import CONFIG, owned, bootstrap, restored_session
 event = json.load(sys.stdin)
 cwd = Path(event['cwd']).resolve()
+if cwd != root and root not in cwd.parents:
+    raise SystemExit(0)
+task = cwd
+while task != root and task.parent != root / 'experiments':
+    task = task.parent
+try:
+    context = restored_session(event.get('session_id'), event.get('entry'),
+                               task if task != root else None)
+except (ValueError, OSError) as error:
+    print(f'App context not restored: {error}')
+    raise SystemExit(0)
+if context and context['task']:
+    cwd = context['task']
 if cwd == root:
-    role = home / '.config/research/role'
-    if not role.exists() or role.read_text().strip() != 'dispatcher':
+    role = CONFIG / 'role'
+    if context is None and (not role.exists() or role.read_text().strip() != 'dispatcher'):
         raise SystemExit(0)
-    try:
-        subprocess.run([str(root / 'bin/rules-pull')], timeout=15, check=True)
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-        print('rules sync failed or timed out; using local rules')
-    status = home / '.local/state/rules-sync.status'
-    if status.exists():
-        print(status.read_text().strip())
-    for command in (['kb', 'sync-agents'], ['board'], ['kb', 'index'], ['kb', 'lint', '--brief']):
-        subprocess.run([str(root / 'bin' / command[0]), *command[1:]], check=False,
-                       stdout=subprocess.DEVNULL if command == ['board'] else None)
+    print(bootstrap(context['role'], entry=context['entry'], session=context['session'])
+          if context else bootstrap('dispatcher'))
+    if context is None:
+        print('这是 CLI 上下文提示，不注册 App Dispatcher；App 需显式 entry 和原生核验 session 后注册。')
     print('## TODO')
     todo = root / 'TODO.md'
     print(todo.read_text().strip() if todo.exists() else '(none)')
@@ -36,9 +43,18 @@ if cwd == root:
     print('## Latest 3 completed task STATUS')
     for path in sorted(done, key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
         print(path.parent.name + ': ' + path.read_text().strip())
-elif cwd.parent == root / 'experiments':
+    pending = sorted(root.glob('experiments/*/.feishu-pending'))
+    if pending:
+        print('## Feishu board sync pending (local STATUS is current)')
+        for path in pending:
+            print(path.parent.name + ': ' + path.read_text().strip())
+else:
+    while cwd != root and cwd.parent != root / 'experiments':
+        cwd = cwd.parent
+    if cwd == root:
+        raise SystemExit(0)
     source = event.get('source', 'startup')
-    counter = cwd / '.compactions'
+    counter = owned(cwd / '.compactions')
     count = 0
     if source == 'compact':
         sid = event.get('session_id', '')
@@ -47,4 +63,7 @@ elif cwd.parent == root / 'experiments':
         counter.write_text(f'{sid}\n{count}\n')
     elif counter.exists():
         counter.unlink()
-    subprocess.run([str(root / 'bin/lead-reload'), str(cwd), source, str(count)], check=True)
+    command = [str(root / 'bin/lead-reload'), str(cwd), source, str(count)]
+    if context:
+        command += ['--entry', context['entry'], '--session', context['session']]
+    subprocess.run(command, check=True)

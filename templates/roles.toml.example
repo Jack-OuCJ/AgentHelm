@@ -1,87 +1,101 @@
-# Replace model names and commands for your environment (按你的环境替换).
-# Candidates: provider:model[:effort]. All CLI commands belong in this file.
-# When a command template uses {effort}, every candidate must include it.
-# Edit this file locally, then run bin/models to generate and sync agent rules.
+# 工作区模型分配。default 沿用已有 CLI 模型设置，不修改账号、代理和权限。
 [providers]
 claude = true
 codex = true
 
 [commands.claude]
 template = 'claude --model {model} --effort {effort} {research_flags}'
-research_flags = "--settings '{\"enabledPlugins\":{\"ponytail@ponytail\":false}}'"
+default_template = 'claude {research_flags}'
+research_flags = ''
 check = 'claude --version'
 
 [commands.codex]
 template = 'codex exec -m {model} -c model_reasoning_effort={effort} {research_flags}'
+default_template = 'codex exec {research_flags}'
 research_flags = ''
 check = 'codex --version'
 
+# App 模型与 CLI candidates 独立。字段缺省时逐字段回退公共默认，再回退目标 App 原生默认。
+# default 明确重置继承；不采用 Dispatcher 当前设置。实际模型及强度组合由宿主验证。
+[app.defaults.ccd]
+model = "default"
+effort = "default"
+
+[app.defaults.codex]
+model = "default"
+effort = "default"
+
+# 需要覆盖时使用角色的 App 表；model 与 effort 可以分别省略。
+# [roles.lead.app.codex]
+# model = "your-model-id"
+# effort = "your-supported-effort"
+
 [roles.lead]
-desc = "Task lead"
+desc = "任务组长"
 tier = "Strategist"
-candidates = ["claude:sonnet:medium"]
+candidates = ["claude:default"]
 mode = "first"
 research = false
 
 [roles.lead_important]
-desc = "Important task lead"
+desc = "重要任务组长"
 tier = "Strategist"
-candidates = ["claude:opus:high"]
+candidates = ["claude:default"]
 mode = "first"
 research = false
 
 [roles.hard]
-desc = "Critical implementation"
+desc = "复杂执行"
 tier = "Executor"
-candidates = ["codex:gpt-5:high"]
+candidates = ["codex:default"]
 mode = "first"
 research = false
 
 [roles.fact]
-desc = "Research and implementation"
+desc = "研究与执行"
 tier = "Executor"
-candidates = ["claude:sonnet:medium"]
+candidates = ["claude:default"]
 mode = "first"
-research = "split"
+research = false
 
 [roles.chore]
-desc = "Routine work"
+desc = "机械工作"
 tier = "Helper"
-candidates = ["claude:haiku:low"]
+candidates = ["claude:default"]
 mode = "first"
 research = false
 
 [roles.writing]
-desc = "Reports"
+desc = "写作"
 tier = "Strategist"
-candidates = ["claude:opus:medium"]
+candidates = ["claude:default"]
 mode = "first"
 research = false
 
 [roles.visual]
-desc = "Visual design"
+desc = "视觉设计"
 tier = "Strategist"
-candidates = ["claude:opus:high"]
+candidates = ["claude:default"]
 mode = "first"
 research = false
 
 [roles.review]
-desc = "Code review"
+desc = "审查能力映射，流程按用户规则"
 tier = "Executor"
-candidates = ["codex:gpt-5:high", "claude:sonnet:high"]
-mode = "all"
-research = true
+candidates = ["codex:default"]
+mode = "first"
+research = false
 
 [roles.simplify]
-desc = "Code simplification"
+desc = "代码精简"
 tier = "Executor"
-candidates = ["codex:gpt-5:medium"]
+candidates = ["codex:default"]
 mode = "first"
 research = false
 
 [roles.aesthetic]
-desc = "Aesthetic review"
+desc = "视觉审查"
 tier = "Executor"
-candidates = ["claude:opus:high"]
+candidates = ["claude:default"]
 mode = "first"
-research = true
+research = false

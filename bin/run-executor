@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Run an explicitly delegated task with project bootstrap and an existing CLI."""
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+from _workspace import ROOT, CONFIG, bootstrap, task_directory, runtime_entry
+from _toml import loads
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('task_dir')
+parser.add_argument('--role', choices=('fact', 'hard', 'chore', 'writing', 'visual', 'simplify', 'aesthetic'), default='fact')
+parser.add_argument('--print', action='store_true', dest='print_only')
+parser.add_argument('--entry', choices=('app.codex', 'app.ccd', 'cli.claude', 'cli.codex'))
+parser.add_argument('--session')
+parser.add_argument('--app-params', default='{}', help='JSON host defaults and operation parameters')
+args = parser.parse_args()
+task = task_directory(args.task_dir)
+brief = sys.stdin.read()
+if not brief.strip():
+    parser.error('supply an explicitly authorized task brief on stdin')
+try:
+    entry = runtime_entry(args.entry, args.session, task)
+    if not (entry and entry.startswith('app.')) and args.app_params != '{}':
+        parser.error('--app-params requires a bound App session')
+    if entry and entry.startswith('app.'):
+        from _app_sessions import transaction, load_state
+        from _app_requests import prepare
+        parameters = json.loads(args.app_params)
+        if not isinstance(parameters, dict):
+            parser.error('App parameters must be a JSON map')
+        parameters.update(role=args.role, brief=brief)
+        if args.print_only:
+            request = prepare(load_state(), args.session, 'executor', task, parameters)
+            request.pop('id')
+            request.update(preview=True, executable=False, status='preview',
+                           host_instructions='Preview only. Do not execute or submit a receipt; no request was recorded.')
+        else:
+            with transaction() as state:
+                request = prepare(state, args.session, 'executor', task, parameters)
+        print(json.dumps(request, ensure_ascii=False))
+        raise SystemExit(0)
+except (ValueError, OSError) as error:
+    parser.error(str(error))
+config = loads((CONFIG / 'roles.toml').read_text())
+sys.path.insert(0, str(ROOT / 'bin'))
+import runpy
+models = runpy.run_path(str(ROOT / 'bin/models'))
+models['validate'](config)
+selected = models['select'](config, config['roles'][args.role])
+if len(selected) != 1:
+    parser.error('executor requires exactly one enabled candidate')
+if entry and selected[0].split(':')[0] != entry.split('.')[1]:
+    parser.error('CLI entry conflicts with selected role provider')
+command = shlex.split(models['command'](config, selected[0], config['roles'][args.role].get('research') is True))
+prompt = bootstrap('executor (' + args.role + ')', task, entry=entry) + '\n委派任务：\n' + brief
+if args.print_only:
+    print(shlex.join(command))
+    print(prompt)
+else:
+    if selected[0].split(':')[0] == 'claude':
+        command.append('-p')
+    command.append(prompt)
+    raise SystemExit(subprocess.run(command, cwd=task, stdin=subprocess.DEVNULL).returncode)

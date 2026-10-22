@@ -1,25 +1,63 @@
-#!/bin/sh
-set -eu
-case ${1:-} in ''|--apply) ;; *) echo 'Usage: merge-hooks [--apply]' >&2; exit 2 ;; esac
-settings=$HOME/.claude/settings.json
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-if [ -f "$settings" ]; then cp "$settings" "$tmp/input"; else printf '{}\n' > "$tmp/input"; fi
-command='"$(cat "$HOME/.config/research/install-dir")/bin/lead-watch-start"'
-jq --arg command "$command" '
-  .hooks.SessionStart = ((.hooks.SessionStart // []) |
-    if any(.[]; any(.hooks[]?; .type == "command" and .command == $command))
-    then . else . + [{matcher: "", hooks: [{type: "command", command: $command}]}] end)
-' "$tmp/input" > "$tmp/output"
-if [ "${1:-}" != --apply ]; then cat "$tmp/output"; exit 0; fi
-if [ -f "$settings" ] && cmp -s "$settings" "$tmp/output"; then
-    echo 'hooks: unchanged'
-    exit 0
-fi
-mkdir -p "$HOME/.claude"
-if [ -f "$settings" ]; then
-    backup=$(mktemp "$settings.backup.XXXXXX")
-    cp -p "$settings" "$backup"
-fi
-cp "$tmp/output" "$settings"
-echo 'hooks: merged'
+#!/usr/bin/env python3
+"""Merge the SessionStart hook into project settings only."""
+import json
+from pathlib import Path
+import shlex
+import sys
+root = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(root / 'bin'))
+from _workspace import owned, write
+settings = owned(root / '.claude/settings.json')
+data = json.loads(settings.read_text()) if settings.exists() else {}
+entries = data.setdefault('hooks', {}).setdefault('SessionStart', [])
+marker = '# agenthelm-session-start'
+source = '''# agenthelm-session-start
+import json, os, subprocess, sys
+from pathlib import Path
+event = json.load(sys.stdin)
+start = Path(os.environ.get('CLAUDE_PROJECT_DIR') or event['cwd']).resolve()
+for directory in (start, *start.parents):
+    hook = directory / 'bin/lead-watch-start'
+    if hook.is_file() and (directory / 'skills/agenthelm-workflow/SKILL.md').is_file():
+        raise SystemExit(subprocess.run([str(hook)], input=json.dumps(event), text=True).returncode)
+'''
+command = 'python3 -c ' + shlex.quote(source)
+
+
+def managed(entry, hook):
+    if hook.get('type') != 'command':
+        return False
+    try:
+        parts = shlex.split(hook.get('command', ''))
+    except ValueError:
+        return False
+    if len(parts) == 3 and parts[:2] == ['python3', '-c'] and parts[2].startswith(marker + '\n'):
+        return True
+    # Recognize the exact signature emitted by the former absolute-path installer,
+    # including entries left behind after moving the checkout.
+    return (len(parts) == 1 and Path(parts[0]).is_absolute()
+            and Path(parts[0]).parts[-2:] == ('bin', 'lead-watch-start')
+            and entry.get('matcher') == 'startup|resume|clear|compact'
+            and hook.get('timeout') == 10)
+
+
+found = False
+updated = []
+for entry in entries:
+    hooks, removed = [], False
+    for hook in entry.get('hooks', []):
+        if managed(entry, hook):
+            if found:
+                removed = True
+                continue
+            hook = dict(hook, command=command)
+            found = True
+        hooks.append(hook)
+    if hooks or not removed:
+        updated.append(dict(entry, hooks=hooks))
+entries[:] = updated
+if not found:
+    entries.append({'matcher': 'startup|resume|clear|compact', 'hooks': [
+        {'type': 'command', 'command': command, 'timeout': 10}]})
+write(settings, json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+print('merge-hooks: project settings only')

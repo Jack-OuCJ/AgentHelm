@@ -1,14 +1,37 @@
-#!/bin/sh
-set -eu
-bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-experiments=$(CDPATH= cd -- "$bin/../experiments" && pwd)
-dir=$(pwd -P)
-while [ "$(dirname -- "$dir")" != "$experiments" ]; do
-    [ "$dir" != / ] || { echo 'Run inside experiments/<task>.' >&2; exit 2; }
-    dir=$(dirname -- "$dir")
-done
-case ${1:-} in needs-input|running|done|blocked) ;; *) echo 'Usage: status needs-input|running|done|blocked [description] [cost]' >&2; exit 2 ;; esac
-printf '%s | %s | %s | %s\n' "$1" "$(basename -- "$dir")" "${2:-}" "${3:-}" > "$dir/STATUS"
-"$bin/board"
-"$bin/kb" index
-exec "$bin/notion-sync" "$dir"
+#!/usr/bin/env python3
+"""Update local task state, refresh indexes, then mirror to the project board."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from _workspace import ROOT, owned, task_directory
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('state', choices=('needs-input', 'running', 'done', 'blocked'))
+parser.add_argument('description', nargs='?', default='')
+parser.add_argument('cost', nargs='?', default='')
+args = parser.parse_args()
+task = Path.cwd().resolve()
+while task != ROOT and task.parent != ROOT / 'experiments':
+    if task.parent == task:
+        parser.error('run inside this workspace experiments/<task> directory')
+    task = task.parent
+task = task_directory(task)
+status = owned(task / 'STATUS')
+description = args.description.replace('|', '｜').replace('\n', ' ')
+cost = args.cost.replace('|', '｜').replace('\n', ' ')
+value = f'{args.state} | {task.name} | {description} | {cost}\n'
+with tempfile.NamedTemporaryFile(mode='w', dir=task, prefix='.status-', delete=False) as handle:
+    handle.write(value)
+    temporary = handle.name
+try:
+    os.replace(temporary, status)
+finally:
+    Path(temporary).unlink(missing_ok=True)
+subprocess.run([str(ROOT / 'bin/board')], check=True)
+subprocess.run([str(ROOT / 'bin/kb'), 'index'], check=True)
+sync = subprocess.run([str(ROOT / 'bin/board-sync'), str(task)])
+if sync.returncode:
+    print('status: board sync pending; local update succeeded. Retry bin/board-sync <task-dir>.', file=sys.stderr)

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Print all task states and TODO; refresh BOARD.md."""
 from pathlib import Path
+from _workspace import write
 root = Path(__file__).resolve().parent.parent
 lines = ['# Board', '', '## Tasks', '']
 for path in sorted(root.glob('experiments/*/STATUS')):
-    lines.append(f'- {path.parent.name}: {path.read_text().strip()}')
+    pending = ' [飞书待同步]' if (path.parent / '.feishu-pending').exists() else ''
+    lines.append(f'- {path.parent.name}: {path.read_text().strip()}{pending}')
 lines += ['', '## TODO', '']
 todo = root / 'TODO.md'
 lines.append(todo.read_text().rstrip() if todo.exists() else '(none)')
 content = '\n'.join(lines) + '\n'
-(root / 'BOARD.md').write_text(content)
+write(root / 'BOARD.md', content)
 print(content, end='')

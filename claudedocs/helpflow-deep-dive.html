@@ -1,0 +1,1040 @@
+<!doctype html>
+<!--
+约束简报（沿用 agenthelm-intro.html 的设计语言）
+风格：瑞士国际主义 —— 12 栏网格（栏宽 118，栏距 24）、齐左、无衬线、黑白 + 单一红色强调、细线与大号数字。
+Token：paper #fafafa · line #dbdbdb · line-2 #bdbdbd · ink #171717 · ink-2 #6a6a6a · red #df1623 · red-text #c70b16。
+文字色仅 ink / ink-2 / red-text；红底上只用 paper。字号 ≥ 18（舞台坐标），字重 400 / 700。
+结构：序章 + 四章，共 19 幕；每幕一个主张标题。内容来源：experiments/004-helpflow-deep-dive/findings。
+动效：入场 600–700ms cubic-bezier(.2,0,0,1)，离场 200ms；尊重 prefers-reduced-motion。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HelpFlow 深度拆解</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --paper:#fafafa;--line:#dbdbdb;--line-2:#bdbdbd;
+  --ink:#171717;--ink-2:#6a6a6a;--red:#df1623;--red-text:#c70b16;
+  --ease:cubic-bezier(.2,0,0,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --sans:"Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB",sans-serif;
+  --mono:"SF Mono",Menlo,Consolas,"PingFang SC",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);overflow:hidden}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform:translate(-50%,-50%) scale(var(--s,1));
+  background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:20px;line-height:1.6;overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+.mono{font-family:var(--mono)}
+.nw{white-space:nowrap}
+.muted{color:var(--ink-2)}
+.accent{color:var(--red-text)}
+.b{font-weight:700}
+.small{font-size:18px}
+h2,p,dl,dd,ul{margin:0;padding:0}
+ul{list-style:none}
+
+/* 外框 */
+.top{position:absolute;top:48px;left:120px;right:120px;display:flex;justify-content:space-between;align-items:baseline;
+  padding-bottom:24px;border-bottom:2px solid var(--ink)}
+.top .b{font-size:20px}
+.top .muted{font-variant-numeric:tabular-nums}
+.progress{position:absolute;left:120px;right:120px;bottom:60px;display:flex;gap:8px}
+.seg{flex:1;padding:12px 0;border:0;background:none;cursor:pointer}
+.seg.ch{margin-left:16px}
+.seg i{position:relative;display:block;height:4px;background:var(--line)}
+.seg i::after{content:"";position:absolute;inset:0;background:var(--ink);transform:scaleX(var(--p,0));transform-origin:left}
+.seg.cur i::after{background:var(--red)}
+.seg:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.hint{position:absolute;left:120px;bottom:24px;font-size:18px;color:var(--ink-2)}
+.mode{position:absolute;right:120px;bottom:16px;display:flex;align-items:center;gap:10px;height:40px;padding:0 4px;border:0;background:none;font:18px/1 var(--sans);color:var(--ink-2);cursor:pointer}
+.mode i{width:16px;height:16px;border:2px solid var(--ink-2);transition:background 200ms var(--ease),border-color 200ms var(--ease)}
+.mode[aria-pressed="true"]{color:var(--ink)}
+.mode[aria-pressed="true"] i{background:var(--red);border-color:var(--red)}
+.mode:hover{color:var(--ink)}
+.mode:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+
+/* 场景 */
+.scene{position:absolute;top:160px;left:120px;width:1680px;height:792px;opacity:0;visibility:hidden}
+.scene.is-active{opacity:1;visibility:visible}
+.scene.is-leaving{opacity:0;visibility:visible;transition:opacity 200ms var(--ease-in)}
+.scene>*{position:absolute}
+.scene:not(.is-active):not(.is-leaving) *{transition:none!important}
+.scene svg{left:0;top:0;width:1680px;height:792px;overflow:visible;pointer-events:none}
+
+.kick{left:0;top:0;font-size:18px;color:var(--ink-2)}
+.kick b{color:var(--red-text);margin-right:12px}
+.h2{left:0;top:36px;font-size:48px;font-weight:700;line-height:1.2;letter-spacing:-.01em}
+.label{font-size:20px;font-weight:700}
+.note{border-left:4px solid var(--red);padding-left:24px}
+
+/* 揭示原语 */
+.r{opacity:0;transform:translateY(24px);transition:opacity 600ms var(--ease),transform 600ms var(--ease)}
+.r.on{opacity:1;transform:none}
+.m{display:block;overflow:hidden;padding-bottom:.12em;margin-bottom:-.12em}
+.m>span{display:block;transform:translateY(110%);transition:transform 700ms var(--ease)}
+.m.on>span{transform:none}
+.wx{transform:scaleX(0);transform-origin:left;transition:transform 700ms var(--ease)}
+.wx.on{transform:none}
+.wy{transform:scaleY(0);transform-origin:top;transition:transform 700ms var(--ease)}
+.wy.on{transform:none}
+.wc{clip-path:inset(0 100% 0 0);transition:clip-path 700ms var(--ease)}
+.wc.on{clip-path:inset(0 0 0 0)}
+.f{opacity:0;transition:opacity 300ms var(--ease)}
+.f.on{opacity:1}
+.dr{fill:none;stroke:var(--ink-2);stroke-width:2;stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 700ms var(--ease)}
+.dr.on{stroke-dashoffset:0}
+.ah{fill:var(--ink-2)}
+
+/* S1 封面 */
+.col{top:0;width:118px;height:792px;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.display{font-size:192px;font-weight:700;line-height:.92;letter-spacing:-.04em}
+.redblock{background:var(--red);color:var(--paper);display:flex;flex-direction:column;justify-content:flex-end;padding:32px}
+.redblock div{font-size:36px;font-weight:700;line-height:1.3}
+.redblock .small{font-weight:400;font-size:18px;margin-top:16px}
+
+/* S2 定位 */
+.pbox{border:2px solid var(--ink);padding:24px 28px}
+.pbox.ext{border-style:dashed}
+.pbox .mono{font-size:18px;margin-top:8px}
+.arrow{height:2px;background:var(--ink)}
+.arrow::after{content:"";position:absolute;right:-2px;top:-7px;border:8px solid transparent;border-left:12px solid var(--ink);border-right:0}
+.stat .bar{height:4px;background:var(--ink)}
+.stat .bar.red{background:var(--red)}
+.stat .big{font-size:128px;font-weight:700;line-height:1;letter-spacing:-.03em;margin-top:24px;font-variant-numeric:tabular-nums}
+.stat .big small{font-size:96px;font-weight:700;color:var(--ink-2);margin:0 8px}
+.stat .nm{font-size:24px;font-weight:700;margin-top:24px}
+.stat .mono{font-size:18px;color:var(--ink-2)}
+
+/* S3 目录 */
+.dirs li{display:grid;grid-template-columns:112px 1fr;align-items:center;height:96px;border-top:1px solid var(--line)}
+.dirs .cat{font-size:18px;font-weight:700;color:var(--ink-2)}
+.dirs .cat.red{color:var(--red-text)}
+.dirs .p{font-family:var(--mono);font-size:22px;font-weight:700;line-height:1.4}
+.dirs .d{color:var(--ink-2);line-height:1.5}
+.dirs li.loc .p{color:var(--ink-2);font-weight:400}
+
+/* S4 能力 */
+.code{border:2px solid var(--ink);padding:28px 32px;font-family:var(--mono);font-size:20px;line-height:1.6;white-space:pre}
+.code .k{color:var(--ink-2)}
+.code .hl{color:var(--red-text);font-weight:700}
+.cells{display:flex;gap:4px}
+.cells i{flex:1;display:block}
+.t-core{background:var(--ink)}
+.t-diag{background:var(--ink-2)}
+.t-sup{background:var(--line-2)}
+.t-fu{border:2px solid var(--ink);background:var(--paper)}
+.a-r{background:var(--line)}
+.a-w{background:var(--red)}
+.legend{display:grid;grid-template-columns:repeat(4,1fr)}
+.legend .n{font-size:48px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.legend .mono{font-size:18px;color:var(--ink-2);display:flex;align-items:center;gap:8px}
+.sw{display:inline-block;width:14px;height:14px;flex:none}
+
+/* 流程时间线 */
+.track{height:2px;background:var(--ink)}
+.dot{width:24px;height:24px;border:2px solid var(--ink);background:var(--paper);transition:background 200ms var(--ease)}
+.dot.on{background:var(--ink)}
+.dot.last.on{background:var(--red);border-color:var(--red)}
+.runner{width:24px;height:24px;background:var(--red);opacity:0}
+.node{width:312px}
+.node .n{font-size:18px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.node .t{font-size:30px;font-weight:700;line-height:1.3}
+.node .mono{font-size:18px;color:var(--ink-2);margin-top:8px;line-height:1.6}
+.node .d{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);width:288px;line-height:1.6}
+.node.s{width:224px}
+.node.s .t{font-size:24px}
+.node.s .d{width:212px}
+.flag{display:inline-block;margin-top:12px;font-size:18px;border:2px solid var(--ink-2);color:var(--ink-2);padding:0 8px;line-height:28px}
+
+/* S6 通道 */
+.chan .bar{height:4px;background:var(--ink)}
+.chan .bar.red{background:var(--red)}
+.chan .num{font-size:96px;font-weight:700;line-height:1;margin-top:20px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.chan .nm{font-size:30px;font-weight:700;line-height:1.3;margin-top:16px}
+.chan .sub{font-size:18px;color:var(--ink-2)}
+.chan ul{margin-top:20px}
+.chan li{display:flex;justify-content:space-between;align-items:center;height:44px;border-top:1px solid var(--line)}
+.chan li span{font-size:18px;color:var(--ink-2)}
+
+/* S7 护栏 */
+.layer{border-left:8px solid var(--line-2);padding:12px 0 12px 32px}
+.layer.l2{border-color:var(--ink-2)}
+.layer.l3{border-color:var(--red)}
+.layer .hd{display:flex;align-items:baseline;gap:16px;margin-bottom:8px}
+.layer .hd b{font-size:30px;line-height:1.3}
+.layer .hd span{font-size:18px;color:var(--ink-2)}
+.layer.l3 .hd span{color:var(--red-text);font-weight:700}
+.layer ul{display:grid;grid-template-columns:1fr 1fr;column-gap:32px}
+.layer ul.one{grid-template-columns:1fr}
+.bl li{position:relative;padding-left:20px;line-height:1.6}
+.bl li::before{content:"";position:absolute;left:0;top:.8em;width:8px;height:2px;background:var(--ink)}
+.gapbox{border-left:4px solid var(--red);padding-left:24px}
+.gapbox .label{color:var(--red-text);font-size:24px;margin-bottom:8px}
+.gapbox li{display:grid;grid-template-columns:44px 1fr;padding:14px 0;border-top:1px solid var(--line);line-height:1.5}
+.gapbox li b{color:var(--red-text)}
+
+/* S9 分诊 */
+.colhd .label{font-size:24px}
+.colhd .mono{font-size:18px;color:var(--ink-2)}
+.qrow{display:grid;grid-template-columns:88px 1fr;align-items:center;height:64px;border-top:1px solid var(--line)}
+.ptag{display:inline-block;width:56px;text-align:center;font-weight:700;line-height:36px;font-size:20px}
+.p0{background:var(--red);color:var(--paper)}
+.p1{background:var(--ink);color:var(--paper)}
+.p2{border:2px solid var(--ink);line-height:32px}
+.p3{border:2px solid var(--line-2);color:var(--ink-2);line-height:32px}
+.wrow{display:grid;grid-template-columns:120px 1fr 48px;align-items:center;height:60px;border-top:1px solid var(--line)}
+.wrow .bar{height:24px;background:var(--ink)}
+.wrow .bar.red{background:var(--red)}
+.wrow b{text-align:right;font-variant-numeric:tabular-nums}
+.fact{border:2px solid var(--ink);padding:14px 20px;height:96px;margin-bottom:16px}
+.fact.f2{border-color:var(--ink-2)}
+.fact.f3{border-style:dashed;border-color:var(--ink-2)}
+.fact b{display:block;font-size:24px;line-height:1.4}
+.fact span{font-size:18px;color:var(--ink-2)}
+
+/* S10 表格 */
+.tr{display:grid;grid-template-columns:220px 300px 300px 400px 460px;align-items:center;min-height:100px;border-bottom:1px solid var(--line)}
+.tr>div{padding-right:24px;line-height:1.5}
+.tr.hd{min-height:48px;align-items:end;padding-bottom:8px;border-bottom:2px solid var(--ink);font-size:18px;font-weight:700;color:var(--ink-2)}
+.tr.hd .nh{color:var(--red-text)}
+.tr .src{font-family:var(--mono);font-size:22px;font-weight:700}
+.tr .nh{color:var(--red-text);font-weight:700}
+
+/* S11 判定 */
+.mrow{display:grid;grid-template-columns:280px repeat(3,1fr);align-items:center;height:88px;border-top:1px solid var(--line)}
+.mrow.hd{height:72px;border-top:0;border-bottom:2px solid var(--ink);align-items:end;padding-bottom:8px}
+.mrow.hd b{display:block;font-size:24px;line-height:1.3}
+.mrow.hd span{font-size:18px;color:var(--ink-2)}
+.mrow>.rl{font-size:24px;font-weight:700}
+.mc{height:100%;display:flex;align-items:center;gap:12px;padding-left:16px}
+.mc i{display:block;width:28px;height:28px;flex:none}
+.q1{background:var(--red)}
+.q2{background:var(--ink)}
+.q3{border:2px solid var(--ink)}
+.q4{border:2px solid var(--red)}
+.mc.hatch{background:repeating-linear-gradient(135deg,var(--line) 0 2px,transparent 2px 12px);font-size:18px;color:var(--ink-2)}
+.mc .cap{color:var(--red-text);font-weight:700;font-size:18px}
+.rules li{padding:16px 0;border-top:1px solid var(--line);line-height:1.6}
+.rules li b{display:block;color:var(--red-text);font-size:18px}
+
+/* S12 / S13 阶梯 */
+.step{padding:16px;border:1px solid var(--line);border-top:4px solid var(--ink);background:var(--paper)}
+.step .tg{font-size:18px;font-weight:700;line-height:1.4}
+.step .tt{font-size:22px;font-weight:700;line-height:1.35;margin-top:6px}
+.step .ev{font-size:18px;color:var(--ink-2);line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+.step.no{border-top-color:var(--line-2)}
+.step.no .tg,.step.no .tt{color:var(--ink-2)}
+.step.yes{border-top-color:var(--red)}
+.step.yes .tg{color:var(--red-text)}
+.step.root{background:var(--red);border-color:var(--red);color:var(--paper)}
+.step.root .tg,.step.root .ev{color:var(--paper)}
+.tz li{display:grid;grid-template-columns:200px 1fr;height:40px;align-items:center;border-top:1px solid var(--line)}
+.lg{display:flex;gap:24px;font-size:18px;color:var(--ink-2)}
+.lg span{display:flex;align-items:center;gap:8px}
+
+/* S14 分布 */
+.hb li{display:grid;grid-template-columns:180px 580px 1fr;align-items:center;height:80px;border-top:1px solid var(--line)}
+.hb .bar{height:32px;background:var(--ink)}
+.hb .bar.red{background:var(--red)}
+.hb b{font-size:30px;font-variant-numeric:tabular-nums;padding-left:16px}
+.pat li{display:grid;grid-template-columns:48px 1fr 150px;align-items:center;height:64px;border-top:1px solid var(--line)}
+.pat .n{color:var(--red-text);font-weight:700;font-size:18px}
+.pat .mono{font-size:18px;color:var(--ink-2);text-align:right}
+
+/* S15 双目录 */
+.brk{border-top:2px solid var(--ink);padding-top:8px}
+.brk::before,.brk::after{content:"";position:absolute;top:-2px;width:2px;height:14px;background:var(--ink)}
+.brk::before{left:0}
+.brk::after{right:0}
+.brk .mono{font-size:20px;font-weight:700}
+.colh{font-size:20px;font-weight:700;border-bottom:1px solid var(--line);padding-bottom:8px}
+.chips{display:grid;gap:8px 24px}
+.chips.two{grid-template-columns:1fr 1fr}
+.chip{font-family:var(--mono);font-size:18px;height:44px;line-height:40px;padding:0 14px;border:2px solid var(--ink-2);white-space:nowrap}
+.chip.drift{border-color:var(--red);color:var(--red-text);font-weight:700}
+.chip.one{border-style:dashed}
+.ev3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;font-size:18px}
+.ev3 li{border-top:1px solid var(--line);padding-top:8px;line-height:1.5}
+
+/* S16 依赖图 */
+.gn{width:300px;height:64px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:18px;font-weight:700;border:2px solid var(--ink);background:var(--paper)}
+.gn.o{background:var(--ink);color:var(--paper)}
+.gn.c{border-color:var(--line-2)}
+.gn.a{border-color:var(--red);color:var(--red-text)}
+.lyr{width:200px}
+.lyr b{display:block;font-size:24px;line-height:1.3}
+.lyr span{font-size:18px;color:var(--ink-2)}
+.strip{border:2px dashed var(--line-2);height:52px;display:flex;align-items:center;gap:32px;padding:0 24px;font-size:18px}
+
+/* S17 解剖 */
+.fstrip{background:var(--line)}
+.fstrip i{position:absolute;left:0;right:0;background:var(--ink);display:block}
+.fstrip i.red{background:var(--red)}
+.anat li{display:grid;grid-template-columns:120px 180px 1fr;align-items:center;height:82px;border-top:1px solid var(--line)}
+.anat .mono{font-size:18px;color:var(--ink-2)}
+.anat b{font-size:22px}
+.anat li.hl b{color:var(--red-text)}
+
+/* S18 写法 */
+.pgrid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:128px;gap:16px 24px}
+.pcard{border-top:2px solid var(--ink);padding-top:12px}
+.pcard .n{font-size:18px;font-weight:700;color:var(--red-text)}
+.pcard .tt{font-size:24px;font-weight:700;line-height:1.35}
+.pcard .d{color:var(--ink-2);margin-top:4px;line-height:1.5}
+.anti li{border-top:2px solid var(--line-2);padding-top:12px;height:136px}
+.anti .tt{font-size:24px;font-weight:700;line-height:1.35;color:var(--ink-2)}
+.anti .tt i{font-style:normal;margin-right:12px}
+.anti .d{color:var(--ink-2);margin-top:4px;line-height:1.5}
+
+/* S19 收束 */
+.take li{display:grid;grid-template-columns:56px 1fr;align-items:center;min-height:68px;border-top:1px solid var(--line);line-height:1.5}
+.take b{font-size:18px;color:var(--red-text)}
+.take.g b{color:var(--ink-2)}
+.hbar{height:4px;background:var(--red);margin-bottom:12px}
+.hbar.ink{background:var(--ink)}
+
+#rotate{display:none;position:fixed;left:0;right:0;top:calc(50% + 540px * var(--s,1) + 24px);text-align:center;font:18px/1.5 var(--sans);color:var(--ink-2)}
+@media (orientation:portrait) and (max-width:700px){#rotate{display:block}}
+
+@media (prefers-reduced-motion:reduce){
+  .r,.m>span,.wx,.wy,.wc{transform:none!important;clip-path:none!important;opacity:0;transition:opacity 200ms linear!important}
+  .r.on,.m.on>span,.wx.on,.wy.on,.wc.on{opacity:1}
+  .dr{stroke-dashoffset:0!important;opacity:0;transition:opacity 200ms linear!important}
+  .dr.on{opacity:1}
+}
+</style>
+</head>
+<body>
+<div id="stage" aria-roledescription="动画演示">
+  <header class="top"><span class="b">HelpFlow 深度拆解</span><span class="muted" id="sceneLabel">序章　01 / 19</span></header>
+
+  <!-- S1 封面 -->
+  <section class="scene" data-dur="6500" data-end="2500" data-ch="序章" data-name="封面">
+    <div class="col wy" data-at="0" style="left:0"></div>
+    <div class="col wy" data-at="40" style="left:142px"></div>
+    <div class="col wy" data-at="80" style="left:284px"></div>
+    <div class="col wy" data-at="120" style="left:426px"></div>
+    <div class="col wy" data-at="160" style="left:568px"></div>
+    <div class="col wy" data-at="200" style="left:710px"></div>
+    <div class="col wy" data-at="240" style="left:852px"></div>
+    <div class="col wy" data-at="280" style="left:994px"></div>
+    <div class="col wy" data-at="320" style="left:1136px"></div>
+    <div class="col wy" data-at="360" style="left:1278px"></div>
+    <div class="col wy" data-at="400" style="left:1420px"></div>
+    <div class="col wy" data-at="440" style="left:1562px"></div>
+    <div class="redblock wy" data-at="600" style="left:1278px;top:0;width:402px;height:792px">
+      <div class="r" data-at="1500">框架</div>
+      <div class="r" data-at="1580">定位方法</div>
+      <div class="r" data-at="1660">Skills 写法</div>
+      <p class="small r" data-at="1800">三条主线 · 四章 · 19 幕</p>
+    </div>
+    <div class="label r" data-at="900" style="left:0;top:0">深度拆解</div>
+    <div class="muted r" data-at="1000" style="left:852px;top:0;font-size:18px">排障知识与工具仓</div>
+    <h2 class="display" style="left:0;top:96px">
+      <span class="m" data-at="1100"><span>Help</span></span>
+      <span class="m" data-at="1250"><span>Flow</span></span>
+    </h2>
+    <div class="wx" data-at="1600" style="left:0;top:576px;width:1254px;height:2px;background:var(--ink)"></div>
+    <p class="r" data-at="1800" style="left:0;top:624px;width:1100px;font-size:30px;line-height:1.5">线上排障与客服的知识与工具仓。<br><span class="muted" style="font-size:24px">它自己不跑代码，却决定了 agent 怎样查问题。</span></p>
+  </section>
+
+  <!-- S2 一句话定位 -->
+  <section class="scene" data-dur="8500" data-end="3900" data-ch="序章" data-name="定位">
+    <div class="kick r" data-at="0"><b>序章</b>一句话定位</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>HelpFlow 不跑代码，它被 Deep Context 读取</span></span></h2>
+    <div class="pbox r" data-at="600" style="left:0;top:176px;width:686px">
+      <div class="label">HelpFlow 仓 · 知识与工具</div>
+      <div class="mono">capabilities.yaml · skills · scripts · .mcp.json</div>
+      <div class="muted" style="margin-top:4px">声明能力、写排查规则、放取数脚本</div>
+    </div>
+    <div class="muted r" data-at="900" style="left:718px;top:200px;font-size:18px">每轮读取</div>
+    <div class="arrow wx" data-at="900" style="left:698px;top:256px;width:138px"></div>
+    <div class="pbox ext r" data-at="1100" style="left:852px;top:176px;width:828px">
+      <div class="label">Deep Context · 外部运行时</div>
+      <div class="mono">CAPABILITIES.md · CODE_REPOS.md · experience-cases/</div>
+      <div class="muted" style="margin-top:4px">每轮生成运行时文件、挂护栏，再驱动 agent</div>
+    </div>
+    <div class="stat" style="left:0;top:400px;width:402px">
+      <div class="bar red wx" data-at="1400"></div>
+      <div class="big r" data-at="1400"><span data-count="19" data-cs="1500" data-cd="900">19</span></div>
+      <div class="nm r" data-at="1600">能力声明</div>
+      <div class="mono r" data-at="1650">capabilities.yaml</div>
+    </div>
+    <div class="stat" style="left:426px;top:400px;width:402px">
+      <div class="bar wx" data-at="1700"></div>
+      <div class="big r" data-at="1700"><span data-count="14" data-cs="1800" data-cd="800">14</span><small>+</small><span data-count="12" data-cs="1800" data-cd="800">12</span></div>
+      <div class="nm r" data-at="1900">Skills</div>
+      <div class="mono r" data-at="1950">.agents / .claude</div>
+    </div>
+    <div class="stat" style="left:852px;top:400px;width:402px">
+      <div class="bar wx" data-at="2000"></div>
+      <div class="big r" data-at="2000"><span data-count="107" data-cs="2100" data-cd="1100">107</span></div>
+      <div class="nm r" data-at="2200">排障案例</div>
+      <div class="mono r" data-at="2250">cases/</div>
+    </div>
+    <div class="stat" style="left:1278px;top:400px;width:402px">
+      <div class="bar wx" data-at="2300"></div>
+      <div class="big r" data-at="2300"><span data-count="12" data-cs="2400" data-cd="800">12</span></div>
+      <div class="nm r" data-at="2500">只读代码子仓</div>
+      <div class="mono r" data-at="2550">repos/</div>
+    </div>
+    <p class="muted r" data-at="3200" style="left:0;top:728px">本仓不含 agent 运行时代码：运行时在外部服务端，按本仓的声明工作。</p>
+  </section>
+
+  <!-- S3 目录地图 -->
+  <section class="scene" data-dur="10000" data-end="3300" data-ch="01 框架" data-name="目录地图">
+    <div class="kick r" data-at="0"><b>01</b>框架</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>清单、技能、工具、证据，各放一处</span></span></h2>
+    <ul class="dirs" data-seq="700,140" style="left:0;top:176px;width:828px">
+      <li class="r"><span class="cat red">声明</span><div><div class="p">capabilities.yaml</div><div class="d">排查能力唯一清单 + 7 步证据顺序（237 行）</div></div></li>
+      <li class="r"><span class="cat red">声明</span><div><div class="p">.mcp.json</div><div class="d">MCP server 声明与只读工具审批策略</div></div></li>
+      <li class="r"><span class="cat">技能</span><div><div class="p">.claude/skills/</div><div class="d">Claude Code 使用的 12 个 skill</div></div></li>
+      <li class="r"><span class="cat">技能</span><div><div class="p">.agents/skills/</div><div class="d">Deep Context Codex 运行时的 14 个 skill</div></div></li>
+      <li class="r"><span class="cat">工具</span><div><div class="p">scripts/</div><div class="d">Yearning CLI、有界日志搜索、单文件下载、hook</div></div></li>
+    </ul>
+    <ul class="dirs" data-seq="1400,140" style="left:852px;top:176px;width:828px">
+      <li class="r"><span class="cat">证据</span><div><div class="p">repos/</div><div class="d">12 个只读代码子仓，由运行时按设置生成</div></div></li>
+      <li class="r"><span class="cat">证据</span><div><div class="p">cases/</div><div class="d">107 份排障案例 + 索引</div></div></li>
+      <li class="r"><span class="cat">文档</span><div><div class="p">docs/</div><div class="d">设计稿：plugin marketplace、browser takeover</div></div></li>
+      <li class="r"><span class="cat">文档</span><div><div class="p">intercom-doc/</div><div class="d">Intercom 值班转移说明与截图</div></div></li>
+      <li class="r loc"><span class="cat">本地</span><div><div class="p">tmp/ · .tmp/</div><div class="d">本地临时产物，未入库</div></div></li>
+    </ul>
+    <p class="note r" data-at="2600" style="left:0;top:704px;width:1400px">根目录没有 <span class="mono">AGENTS.md</span> / <span class="mono">CLAUDE.md</span>：规则全写在 README、<span class="mono">capabilities.yaml</span> 与 skills 里。</p>
+  </section>
+
+  <!-- S4 能力声明 -->
+  <section class="scene" data-dur="10000" data-end="5500" data-ch="01 框架" data-name="能力声明">
+    <div class="kick r" data-at="0"><b>01</b>框架</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>19 项能力写进一份清单：能查什么、怎么查</span></span></h2>
+    <div class="code r" data-at="600" style="left:0;top:176px;width:686px"><span class="k">- id:</span> thinking-log
+<span class="k">  tier:</span> core
+<span class="k">  transport:</span> mcp
+<span class="k">  access:</span> read
+<span class="k">  route:</span> <span class="hl">只 download 落 scratch，禁 get 全量</span>
+<span class="k">  requirements:</span>
+<span class="k">    env:</span> [HELPFLOW_MGX_TOKEN]
+<span class="k">    binaries:</span> [mgx-thinking-log-mcp]
+<span class="k">    files:</span> [.mcp.json]</div>
+    <p class="muted small r" data-at="900" style="left:0;top:560px">示例：thinking-log 能力项（字段范式 id / tier / transport / access / route / requirements）</p>
+    <p class="note r" data-at="1100" style="left:0;top:624px;width:686px">requirements 只声明变量名、命令、文件；服务端预检只看是否就绪，不输出任何值。</p>
+
+    <div class="label r" data-at="1300" style="left:852px;top:176px">tier 分布 · 19 项</div>
+    <div class="cells" data-seq="1500,50" style="left:852px;top:216px;width:828px;height:96px">
+      <i class="wy t-core"></i><i class="wy t-core"></i><i class="wy t-core"></i><i class="wy t-core"></i><i class="wy t-core"></i><i class="wy t-core"></i><i class="wy t-core"></i>
+      <i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i><i class="wy t-diag"></i>
+      <i class="wy t-sup"></i>
+      <i class="wy t-fu"></i><i class="wy t-fu"></i>
+    </div>
+    <div class="legend" data-seq="2500,100" style="left:852px;top:328px;width:828px">
+      <div class="r"><div class="n">7</div><div class="mono"><i class="sw t-core"></i>core</div></div>
+      <div class="r"><div class="n">9</div><div class="mono"><i class="sw t-diag"></i>diagnostic</div></div>
+      <div class="r"><div class="n">1</div><div class="mono"><i class="sw t-sup"></i>supporting</div></div>
+      <div class="r"><div class="n">2</div><div class="mono"><i class="sw t-fu"></i>follow-up</div></div>
+    </div>
+    <div class="label r" data-at="3200" style="left:852px;top:448px">access · 同一顺序</div>
+    <div class="cells" data-seq="3400,40" style="left:852px;top:488px;width:828px;height:40px">
+      <i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-w"></i>
+      <i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i><i class="wy a-r"></i>
+      <i class="wy a-r"></i>
+      <i class="wy a-w"></i><i class="wy a-w"></i>
+    </div>
+    <div class="legend" data-seq="4300,100" style="left:852px;top:544px;width:828px">
+      <div class="r"><div class="n">16</div><div class="mono"><i class="sw a-r"></i>read</div></div>
+      <div class="r" style="grid-column:span 2"><div class="n accent">3</div><div class="mono"><i class="sw a-w"></i>conditional-write</div></div>
+    </div>
+    <p class="r" data-at="4800" style="left:852px;top:672px;width:828px">写类：<span class="mono">atoms-control · jira-follow-up · feishu-follow-up</span>，都要求用户明确授权。</p>
+  </section>
+
+  <!-- S5 运行时路由 -->
+  <section class="scene" data-dur="9500" data-end="7000" data-ch="01 框架" data-name="运行时路由" data-hook="flow">
+    <div class="kick r" data-at="0"><b>01</b>框架</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>每轮先预检能力，再按 description 触发 skill</span></span></h2>
+    <div class="track wx" data-at="500" style="left:12px;top:235px;width:1344px"></div>
+    <div class="dot" data-at="1300" style="left:0;top:224px"></div>
+    <div class="dot" data-at="2400" style="left:336px;top:224px"></div>
+    <div class="dot" data-at="3500" style="left:672px;top:224px"></div>
+    <div class="dot" data-at="4600" style="left:1008px;top:224px"></div>
+    <div class="dot last" data-at="5700" style="left:1344px;top:224px"></div>
+    <div class="runner" data-times="1300,2400,3500,4600,5700" data-gap="336" style="left:0;top:224px"></div>
+    <div class="node r" data-at="800" style="left:0;top:288px"><div class="n">01</div><div class="t">服务端预检</div><div class="mono">env 名 · 命令 · 文件</div><p class="d muted">只看是否就绪，不读取值</p></div>
+    <div class="node r" data-at="1900" style="left:336px;top:288px"><div class="n">02</div><div class="t">生成运行时文件</div><div class="mono">CAPABILITIES.md<br>CODE_REPOS.md<br>RESPONSIBILITY_FIELD.md<br>experience-cases/</div><p class="d muted">本地工作树里都不存在</p></div>
+    <div class="node r" data-at="3000" style="left:672px;top:288px"><div class="n">03</div><div class="t">触发 skill</div><div class="mono">SKILL.md description</div><p class="d muted">模型按触发词自动选用，不用手敲命令</p></div>
+    <div class="node r" data-at="4100" style="left:1008px;top:288px"><div class="n">04</div><div class="t">按 route 选源</div><div class="mono">Yearning → CLS → …</div><p class="d muted">skill 内的文字规则决定先查哪里</p></div>
+    <div class="node r" data-at="5200" style="left:1344px;top:288px"><div class="n">05</div><div class="t">PreToolUse 护栏</div><div class="mono">block-unbounded-search.js</div><p class="d muted">拦截无界 rg 与递归 grep</p></div>
+    <div class="wx" data-at="6100" style="left:0;top:664px;width:1680px;height:1px;background:var(--line)"></div>
+    <p class="r" data-at="6300" style="left:0;top:696px">没有 skill 直接解析 <span class="mono">capabilities.yaml</span>，<span class="muted">agent 只读生成后的 </span><span class="mono">CAPABILITIES.md</span><span class="muted">。</span></p>
+  </section>
+
+  <!-- S6 外部系统 -->
+  <section class="scene" data-dur="9500" data-end="5000" data-ch="01 框架" data-name="外部系统">
+    <div class="kick r" data-at="0"><b>01</b>框架</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>取数走四条通道：CLI、MCP、平台、脚本</span></span></h2>
+    <div class="chan" style="left:0;top:176px;width:402px">
+      <div class="bar red wx" data-at="600"></div>
+      <div class="num r" data-at="700">6</div>
+      <div class="nm r" data-at="760">CLI</div>
+      <div class="sub r" data-at="800">命令行，凭据走环境变量</div>
+      <ul data-seq="1000,90">
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">yearning-cli</span><span>数据库查询</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">tccli cls</span><span>日志检索</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">langfuse</span><span>LLM trace</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">jira-cli</span><span>跟进建单</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">atoms</span><span>对照实验 · 需授权</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:20px">deepflow</span><span>链路观测</span></li>
+      </ul>
+    </div>
+    <div class="chan" style="left:426px;top:176px;width:402px">
+      <div class="bar wx" data-at="1600"></div>
+      <div class="num r" data-at="1700">7</div>
+      <div class="nm r" data-at="1760">MCP</div>
+      <div class="sub r" data-at="1800">stdio 或 HTTP server</div>
+      <ul data-seq="2000,90">
+        <li class="r">Thinking Log<span>只下载</span></li>
+        <li class="r">Redis<span>alpha / prod</span></li>
+        <li class="r">Jenkins<span class="mono">--read-only</span></li>
+        <li class="r">Kibana<span>main / test</span></li>
+        <li class="r">PostHog<span>HTTP</span></li>
+        <li class="r">Intercom<span>HTTP · OAuth</span></li>
+        <li class="r">Grafana<span>工作树新增</span></li>
+      </ul>
+    </div>
+    <div class="chan" style="left:852px;top:176px;width:402px">
+      <div class="bar wx" data-at="2700"></div>
+      <div class="num r" data-at="2800">2</div>
+      <div class="nm r" data-at="2860">平台</div>
+      <div class="sub r" data-at="2900">会话开始由平台注入</div>
+      <ul data-seq="3100,90">
+        <li class="r">工单上下文<span>证据第 1 步</span></li>
+        <li class="r">飞书<span>写回需授权</span></li>
+      </ul>
+    </div>
+    <div class="chan" style="left:1278px;top:176px;width:402px">
+      <div class="bar wx" data-at="3300"></div>
+      <div class="num r" data-at="3400">2</div>
+      <div class="nm r" data-at="3460">脚本</div>
+      <div class="sub r" data-at="3500">仓内 Python，带硬上限</div>
+      <ul data-seq="3700,90">
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:18px">download_chat_file.py</span><span>单文件</span></li>
+        <li class="r"><span class="mono" style="color:var(--ink);font-size:18px">bounded-log-search.py</span><span>有界搜</span></li>
+      </ul>
+    </div>
+    <p class="note r" data-at="4300" style="left:852px;top:600px;width:828px">CLS 不是 MCP：只用官方 <span class="mono">tccli</span>。Jira 同样走 CLI，不走 MCP。</p>
+  </section>
+
+  <!-- S7 护栏三层 -->
+  <section class="scene" data-dur="11500" data-end="4900" data-ch="01 框架" data-name="护栏">
+    <div class="kick r" data-at="0"><b>01</b>框架</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>只读护栏多半靠文字，代码只守住三处</span></span></h2>
+    <div class="layer r" data-at="600" style="left:0;top:176px;width:1088px">
+      <div class="hd"><b>文字约束</b><span>多数 · 写在 README 与 skill 里</span></div>
+      <ul class="bl">
+        <li>Yearning 只用精确的只读 source</li>
+        <li>CLS 只用 <span class="mono">Describe*</span> 与 <span class="mono">SearchLog</span></li>
+        <li>Thinking Log 禁止全量拉取</li>
+        <li>写操作先预览，用户确认后执行</li>
+      </ul>
+    </div>
+    <div class="layer l2 r" data-at="1300" style="left:0;top:340px;width:1088px">
+      <div class="hd"><b>配置与参数</b><span>启动参数、工具策略</span></div>
+      <ul class="bl">
+        <li>Redis 工具白名单（15 个读工具）</li>
+        <li>Jenkins <span class="mono">--read-only</span></li>
+        <li>Grafana <span class="mono">--enabled-tools</span> 白名单</li>
+      </ul>
+    </div>
+    <div class="layer l3 r" data-at="2000" style="left:0;top:504px;width:1088px">
+      <div class="hd"><b>代码</b><span>仅 3 处</span></div>
+      <ul class="bl one">
+        <li><span class="mono">bounded-log-search</span>：输出默认 32KB，硬上限 256KB</li>
+        <li><span class="mono">download_chat_file</span>：路径校验，只写入 scratch</li>
+        <li><span class="mono">block-unbounded-search</span>：PreToolUse 拦截无界 rg / grep</li>
+      </ul>
+    </div>
+    <div class="gapbox r" data-at="3000" style="left:1136px;top:176px;width:544px">
+      <div class="label">现实差距</div>
+      <ul data-seq="3300,300">
+        <li class="r"><b>01</b><span><span class="mono">yearning-cli</span> 不校验 SQL，任意 source 按名都能用。</span></li>
+        <li class="r"><b>02</b><span>Grafana 没有 <span class="mono">--disable-write</span>，还启用了 dashboard、alerting 等类别。</span></li>
+        <li class="r"><b>03</b><span>工作树重新加入 MySQL 与 CLS 的 MCP，和 README 的规定冲突。</span></li>
+        <li class="r"><b>04</b><span>Yearning 的 WebSocket 连接关闭了 TLS 证书校验。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- S8 7 步证据链 -->
+  <section class="scene" data-dur="11000" data-end="8400" data-ch="02 定位方法" data-name="证据链" data-hook="flow">
+    <div class="kick r" data-at="0"><b>02</b>定位方法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>七步证据链：从工单一路追到对照实验</span></span></h2>
+    <div class="track wx" data-at="500" style="left:12px;top:235px;width:1440px"></div>
+    <div class="dot" data-at="1200" style="left:0;top:224px"></div>
+    <div class="dot" data-at="2100" style="left:240px;top:224px"></div>
+    <div class="dot" data-at="3000" style="left:480px;top:224px"></div>
+    <div class="dot" data-at="3900" style="left:720px;top:224px"></div>
+    <div class="dot" data-at="4800" style="left:960px;top:224px"></div>
+    <div class="dot" data-at="5700" style="left:1200px;top:224px"></div>
+    <div class="dot last" data-at="6600" style="left:1440px;top:224px"></div>
+    <div class="runner" data-times="1200,2100,3000,3900,4800,5700,6600" data-gap="240" style="left:0;top:224px"></div>
+    <div class="node s r" data-at="800" style="left:0;top:288px"><div class="n">01</div><div class="t">工单上下文</div><div class="mono">platform</div><p class="d muted">平台注入，只读本题所需字段</p></div>
+    <div class="node s r" data-at="1700" style="left:240px;top:288px"><div class="n">02</div><div class="t">Yearning</div><div class="mono">yearning-cli.py</div><p class="d muted">先跑 sources，只用只读 source</p></div>
+    <div class="node s r" data-at="2600" style="left:480px;top:288px"><div class="n">03</div><div class="t">CLS</div><div class="mono">tccli cls</div><p class="d muted">报告时间 ±15 min，最窄的查询</p></div>
+    <div class="node s r" data-at="3500" style="left:720px;top:288px"><div class="n">04</div><div class="t">Langfuse / Thinking Log</div><div class="mono">langfuse · MCP</div><p class="d muted">LLM trace 与 agent 执行过程</p></div>
+    <div class="node s r" data-at="4400" style="left:960px;top:288px"><div class="n">05</div><div class="t">部署版本代码</div><div class="mono">repos/</div><p class="d muted">按当时部署的版本解释代码</p><span class="flag">本地仓均停在 main</span></div>
+    <div class="node s r" data-at="5300" style="left:1200px;top:288px"><div class="n">06</div><div class="t">workspace 单文件</div><div class="mono">SCRATCH_DIR</div><p class="d muted">精确相对路径，只取一个文件</p></div>
+    <div class="node s r" data-at="6200" style="left:1440px;top:288px"><div class="n accent">07</div><div class="t">控制变量实验</div><div class="mono">atoms</div><p class="d muted">需要复现，且用户授权</p></div>
+    <div class="wx" data-at="7000" style="left:0;top:616px;width:1680px;height:1px;background:var(--line)"></div>
+    <div class="r" data-at="7300" style="left:0;top:648px;width:828px"><div class="label accent">例外 1 · credits 类问题</div><p>先查 Langfuse，再回到 Yearning 对账。</p></div>
+    <div class="r" data-at="7700" style="left:852px;top:648px;width:828px"><div class="label accent">例外 2 · Kibana 放最后</div><p>0 hit 即停；查不到不代表请求不存在。</p></div>
+  </section>
+
+  <!-- S9 分诊 -->
+  <section class="scene" data-dur="11500" data-end="6300" data-ch="02 定位方法" data-name="分诊">
+    <div class="kick r" data-at="0"><b>02</b>定位方法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>先排队，再打分，最后把事实拆成三层</span></span></h2>
+    <div class="colhd r" data-at="600" style="left:0;top:176px;width:544px"><div class="label">01 队列：按等待时长</div><div class="mono">intercom-triage</div></div>
+    <ul data-seq="900,120" style="left:0;top:264px;width:544px">
+      <li class="qrow r"><span class="ptag p0">P0</span><span>等待超过 7 天</span></li>
+      <li class="qrow r"><span class="ptag p1">P1</span><span>等待 3–7 天</span></li>
+      <li class="qrow r"><span class="ptag p2">P2</span><span>等待 1–3 天</span></li>
+      <li class="qrow r"><span class="ptag p3">P3</span><span>等待不到 1 天</span></li>
+    </ul>
+    <p class="muted r" data-at="1600" style="left:0;top:544px;width:520px">再按关键词分 5 类：部署 / 域名、Agent / 功能、计费、账号、其他。</p>
+
+    <div class="colhd r" data-at="2000" style="left:568px;top:176px;width:544px"><div class="label">02 精排：五维加权</div><div class="mono">ou-intercom-sop · 0–5 分</div></div>
+    <ul data-seq="2300,120" style="left:568px;top:264px;width:520px">
+      <li class="wrow r"><span>客户价值</span><div><div class="bar red wx" data-at="2400" style="width:300px"></div></div><b>1.5</b></li>
+      <li class="wrow r"><span>等待</span><div><div class="bar wx" data-at="2520" style="width:200px"></div></div><b>1.0</b></li>
+      <li class="wrow r"><span>可处理性</span><div><div class="bar wx" data-at="2640" style="width:200px"></div></div><b>1.0</b></li>
+      <li class="wrow r"><span>情绪</span><div><div class="bar wx" data-at="2760" style="width:160px"></div></div><b>0.8</b></li>
+      <li class="wrow r"><span>影响</span><div><div class="bar wx" data-at="2880" style="width:140px"></div></div><b>0.7</b></li>
+    </ul>
+    <p class="muted r" data-at="3300" style="left:568px;top:584px;width:520px">按付费档位加权；证据不足时保守给分并标注。</p>
+
+    <div class="colhd r" data-at="3800" style="left:1136px;top:176px;width:544px"><div class="label">03 事实拆三层</div><div class="mono">每条关键文本标出来源</div></div>
+    <div data-seq="4100,200" style="left:1136px;top:264px;width:544px">
+      <div class="fact r"><b>平台事实</b><span>日志、数据库、部署记录</span></div>
+      <div class="fact f2 r"><b>agent 输出事实</b><span>agent 说了什么、做了什么</span></div>
+      <div class="fact f3 r"><b>用户行为事实</b><span>用户的操作与描述</span></div>
+    </div>
+    <p class="muted r" data-at="4900" style="left:1136px;top:616px;width:544px">不把用户或 agent 的推测当成平台事实。</p>
+    <p class="note r" data-at="5600" style="left:0;top:712px;width:1400px">两套优先级规则并存：triage 按天数，sop 按评分，彼此没有声明谁优先。</p>
+  </section>
+
+  <!-- S10 取证规则 -->
+  <section class="scene" data-dur="13000" data-end="3300" data-ch="02 定位方法" data-name="取证规则">
+    <div class="kick r" data-at="0"><b>02</b>定位方法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>每个数据源都写明：查多宽、查多少、查不到就停</span></span></h2>
+    <div style="left:0;top:176px;width:1680px" data-seq="600,400">
+      <div class="tr hd r"><div>数据源</div><div>时间窗 / 范围</div><div>上限</div><div class="nh">no-hit 与失败</div><div>禁止</div></div>
+      <div class="tr r"><div class="src">Yearning</div><div>先跑 sources，确认精确 source 名</div><div>message LIMIT 30</div><div class="nh">环境或 source 不明即停，报告阻塞</div><div>跨环境、回退可写 source、调用 MySQL MCP</div></div>
+      <div class="tr r"><div class="src">CLS</div><div>报告时间 ±15 min，换算为毫秒</div><div>Limit ≤ 100，起步 20 / 50</div><div class="nh">有理由修正一次，然后切源</div><div>curl、手写签名、现场安装</div></div>
+      <div class="tr r"><div class="src">Thinking Log</div><div>先下载到 scratch</div><div>输出默认 32KB，硬上限 256KB</div><div class="nh">只回小窗口，不读全文</div><div><span class="mono">get_thinking_logs</span> 全量；rg / grep / jq / cat 直读</div></div>
+      <div class="tr r"><div class="src">Kibana</div><div>精确日期索引 <span class="mono nw">k8s-YYYY.MM.DD</span>，短窗</div><div>size 5</div><div class="nh">0 hit 判为未产生日志，即停</div><div><span class="mono">k8s-*</span> 通配索引</div></div>
+      <div class="tr r"><div class="src">workspace</div><div>已知 chat 与精确相对路径</div><div>单个文件，落 scratch</div><div class="nh">失败只核对一次</div><div>枚举、批量导出、执行文件内容</div></div>
+    </div>
+  </section>
+
+  <!-- S11 判定 -->
+  <section class="scene" data-dur="10500" data-end="4100" data-ch="02 定位方法" data-name="判定">
+    <div class="kick r" data-at="0"><b>02</b>定位方法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>结论按五分类 × 三级证据落格，高风险归因封顶</span></span></h2>
+    <div style="left:0;top:176px;width:1112px">
+      <div class="mrow hd r" data-at="600"><div></div><div style="padding-left:16px"><b>已确认</b><span>必须查过生产证据</span></div><div style="padding-left:16px"><b>强推断</b><span>证据不足时降级</span></div><div style="padding-left:16px"><b>待确认</b><span>高风险归因的上限</span></div></div>
+      <div class="mrow r" data-at="900"><div class="rl">平台 bug</div><div class="mc"><i class="q1"></i></div><div class="mc"><i class="q2"></i></div><div class="mc"><i class="q3"></i></div></div>
+      <div class="mrow r" data-at="1050"><div class="rl">agent 质量</div><div class="mc"><i class="q1"></i></div><div class="mc"><i class="q2"></i></div><div class="mc"><i class="q3"></i></div></div>
+      <div class="mrow r" data-at="1200"><div class="rl">quota · billing</div><div class="mc"><i class="q1"></i></div><div class="mc"><i class="q2"></i></div><div class="mc"><i class="q3"></i></div></div>
+      <div class="mrow r" data-at="1350"><div class="rl">基础设施</div><div class="mc hatch">需平台日志</div><div class="mc hatch">或真实 HTTP 探测</div><div class="mc"><i class="q4"></i><span class="cap">无证据时封顶</span></div></div>
+      <div class="mrow r" data-at="1500"><div class="rl">用户错误</div><div class="mc"><i class="q1"></i></div><div class="mc"><i class="q2"></i></div><div class="mc"><i class="q3"></i></div></div>
+    </div>
+    <ul class="rules" data-seq="2400,500" style="left:1136px;top:176px;width:544px">
+      <li class="r"><b>规则 1</b>没查生产证据，不得写“已确认”。</li>
+      <li class="r"><b>规则 2</b>WAF、CDN、路由死锁这类高风险归因，没有平台日志或真实 HTTP 探测，最多写“待确认”。</li>
+      <li class="r"><b>规则 3</b>每条结论注明来源层：平台、agent 或用户。</li>
+    </ul>
+  </section>
+
+  <!-- S12 案例 A -->
+  <section class="scene" data-dur="14000" data-end="7100" data-ch="02 定位方法" data-name="案例 A">
+    <div class="kick r" data-at="0"><b>02</b>定位方法 · 案例 A（runtime）</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>案例 A：卡死一整天，“自愈”其实是发布杀掉了僵尸进程</span></span></h2>
+    <div class="r" data-at="600" style="left:0;top:168px;width:700px">
+      <div class="label">经验：三种时钟先对齐</div>
+      <ul class="tz mono" style="font-size:18px;margin-top:8px">
+        <li><span>message 表</span><span>UTC</span></li>
+        <li><span>thinking log</span><span>UTC-7</span></li>
+        <li><span>CLS</span><span>UTC 毫秒</span></li>
+      </ul>
+      <div class="lg" style="margin-top:16px"><span><i class="sw" style="background:var(--red)"></i>证实</span><span><i class="sw" style="background:var(--line-2)"></i>表象或否证</span><span>越往右上越接近根因</span></div>
+    </div>
+    <div class="step r" data-at="1000" style="left:0;top:520px;width:224px"><div class="tg">症状</div><div class="tt">多个 chat 卡死一整天</div><div class="ev">次日用户称“自己好了”。工单账号与 chat 归属不同，先锁定真正卡死的 chat。</div></div>
+    <div class="step no r" data-at="1900" style="left:242px;top:464px;width:224px"><div class="tg">假设 1 · 表象</div><div class="tt">主循环僵死</div><div class="ev">DB 心跳冻结；用户消息照常入队，但无人回复。</div></div>
+    <div class="step yes r" data-at="2800" style="left:484px;top:408px;width:224px"><div class="tg">假设 2 · 证实</div><div class="tt">判活出错</div><div class="ev">CLS：心跳 stale + lockfile fresh 持续约 6.5h，被判为活，拒绝 respawn。</div></div>
+    <div class="step yes r" data-at="3700" style="left:726px;top:352px;width:224px"><div class="tg">假设 3 · 证实</div><div class="tt">子进程半死</div><div class="ev">Thinking Log：stop 已请求，keep_alive 仍每 10s 刷新 lockfile。</div></div>
+    <div class="step no r" data-at="4600" style="left:968px;top:296px;width:224px"><div class="tg">“自愈” · 否证</div><div class="tt">滚动发布杀掉僵尸进程</div><div class="ev">新 deployment 首条日志与恢复时间重合；用户上线后判 lockfile_stale，自动 respawn。</div></div>
+    <div class="step root r" data-at="5500" style="left:1210px;top:240px;width:224px"><div class="tg">根因</div><div class="tt">两层叠加的平台 bug</div><div class="ev">子进程半死 + 判活漏判：birth_age=None 让僵尸兜底失效。</div></div>
+    <div class="step r" data-at="6400" style="left:1452px;top:184px;width:224px"><div class="tg">验证</div><div class="tt">新版兜底 180s 内恢复</div><div class="ev">同类场景由新的僵尸锁检测自动处理；遗留两项另行跟进。</div></div>
+  </section>
+
+  <!-- S13 案例 B -->
+  <section class="scene" data-dur="13000" data-end="6700" data-ch="02 定位方法" data-name="案例 B">
+    <div class="kick r" data-at="0"><b>02</b>定位方法 · 案例 B（billing）</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>案例 B：账本精确对账，否掉两个假设，结论是真实消耗</span></span></h2>
+    <div class="r" data-at="600" style="left:0;top:168px;width:540px">
+      <div class="label">对账原则</div>
+      <p style="margin-top:8px">唯一真源：<span class="mono">user_credit_accounts</span></p>
+      <p class="muted">先把两套 user_id 映射对齐，再逐周期对账。</p>
+      <div class="lg" style="margin-top:16px"><span><i class="sw" style="background:var(--red)"></i>证实</span><span><i class="sw" style="background:var(--line-2)"></i>否证</span></div>
+    </div>
+    <div class="step r" data-at="1000" style="left:0;top:520px;width:264px"><div class="tg">症状</div><div class="tt">迁移后 credits 归零</div><div class="ev">用户称归零两周、年付未到账。完整对话未读，缺口写明在案。</div></div>
+    <div class="step no r" data-at="2000" style="left:283px;top:456px;width:264px"><div class="tg">假设 1 · 否证</div><div class="tt">年付未到账</div><div class="ev">有一笔 complete 支付，同一秒充入月额度，订阅有效；早先 expired 订单是未付尝试。</div></div>
+    <div class="step no r" data-at="3000" style="left:566px;top:392px;width:264px"><div class="tg">假设 2 · 否证</div><div class="tt">迁移丢失或空扣</div><div class="ev">终身用量 = 各周期之和，精确对上；没有空扣，也没有重复扣。</div></div>
+    <div class="step yes r" data-at="4000" style="left:849px;top:328px;width:264px"><div class="tg">假设 3 · 证实</div><div class="tt">真实消耗</div><div class="ev">约 48h 内由真实模型调用耗尽；耗尽时间与用户感知吻合。</div></div>
+    <div class="step root r" data-at="5000" style="left:1132px;top:264px;width:264px"><div class="tg">结论 · 已确认</div><div class="tt">无平台 bug</div><div class="ev">Langfuse 缺凭据，该项单独列为待确认。</div></div>
+    <div class="step r" data-at="6000" style="left:1415px;top:200px;width:264px"><div class="tg">产品建议</div><div class="tt">耗尽时提示重置日</div><div class="ev">回复告知重置日与补充选项；工单按非缺陷关闭。</div></div>
+  </section>
+
+  <!-- S14 根因分布 -->
+  <section class="scene" data-dur="11500" data-end="4800" data-ch="02 定位方法" data-name="根因分布">
+    <div class="kick r" data-at="0"><b>02</b>定位方法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>107 份案例里，部署问题超过三成</span></span></h2>
+    <ul class="hb" data-seq="600,150" style="left:0;top:176px;width:880px">
+      <li class="r"><span class="mono">deploy</span><div><div class="bar red wx" data-at="700" style="width:560px"></div></div><b data-count="33" data-cs="700" data-cd="800">33</b></li>
+      <li class="r"><span class="mono">runtime</span><div><div class="bar wx" data-at="850" style="width:288px"></div></div><b data-count="17" data-cs="850" data-cd="800">17</b></li>
+      <li class="r"><span class="mono">agent</span><div><div class="bar wx" data-at="1000" style="width:272px"></div></div><b data-count="16" data-cs="1000" data-cd="800">16</b></li>
+      <li class="r"><span class="mono">billing</span><div><div class="bar wx" data-at="1150" style="width:255px"></div></div><b data-count="15" data-cs="1150" data-cd="800">15</b></li>
+      <li class="r"><span class="mono">custom-domain</span><div><div class="bar wx" data-at="1300" style="width:238px"></div></div><b data-count="14" data-cs="1300" data-cd="800">14</b></li>
+      <li class="r"><span>其他</span><div><div class="bar wx" data-at="1450" style="width:204px;background:var(--ink-2)"></div></div><b data-count="12" data-cs="1450" data-cd="800">12</b></li>
+    </ul>
+    <p class="muted small r" data-at="2200" style="left:0;top:672px;width:860px">按案例文件名的分类前缀统计。“其他”含 other 2、integration 2 与 8 个各 1 份的前缀；规定分类只有 9 个。</p>
+    <div class="label r" data-at="2600" style="left:952px;top:176px">反复出现的 8 种模式</div>
+    <ul class="pat" data-seq="2800,180" style="left:952px;top:224px;width:728px">
+      <li class="r"><span class="n">01</span><span>磁盘写满，workspace 被写坏</span><span class="mono">runtime</span></li>
+      <li class="r"><span class="n">02</span><span>僵尸 chattask，消息入库无人消费</span><span class="mono">runtime</span></li>
+      <li class="r"><span class="n">03</span><span>发布后看到旧版本</span><span class="mono">deploy</span></li>
+      <li class="r"><span class="n">04</span><span>钱包耗尽，伪装成部署失败</span><span class="mono">deploy</span></li>
+      <li class="r"><span class="n">05</span><span>Lambda 权限或启动失败</span><span class="mono">deploy</span></li>
+      <li class="r"><span class="n">06</span><span>Entri 域名流程未闭环</span><span class="mono">custom-domain</span></li>
+      <li class="r"><span class="n">07</span><span>“credits 异常”实为真实消耗</span><span class="mono">billing</span></li>
+      <li class="r"><span class="n">08</span><span>Neon 分支或 endpoint 故障</span><span class="mono">deploy</span></li>
+    </ul>
+  </section>
+
+  <!-- S15 两套目录 -->
+  <section class="scene" data-dur="11000" data-end="4700" data-ch="03 Skills 写法" data-name="两套目录">
+    <div class="kick r" data-at="0"><b>03</b>Skills 写法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>两套 skill 目录靠手工复制，已经漂移</span></span></h2>
+    <div class="brk wx" data-at="600" style="left:0;top:168px;width:1254px"><span class="mono">.agents/skills · 14</span><span class="muted">　Deep Context Codex 运行时</span></div>
+    <div class="brk wx" data-at="900" style="left:426px;top:228px;width:1254px;text-align:right"><span class="mono">.claude/skills · 12</span><span class="muted">　Claude Code</span></div>
+    <div class="colh r" data-at="1200" style="left:0;top:300px;width:402px">仅 .agents · 3</div>
+    <div class="colh r" data-at="1200" style="left:426px;top:300px;width:828px">两边都有 · 11<span class="muted" style="font-weight:400">　红框 = 内容已漂移</span></div>
+    <div class="colh r" data-at="1200" style="left:1278px;top:300px;width:402px">仅 .claude · 1</div>
+    <div class="chips" data-seq="1500,80" style="left:0;top:352px;width:402px">
+      <div class="chip one r">dc-download-chat-file</div>
+      <div class="chip one r">support-report-echarts</div>
+      <div class="chip one r">support-reports-sql</div>
+    </div>
+    <div class="chips two" data-seq="1800,80" style="left:426px;top:352px;width:828px">
+      <div class="chip drift r">mgx-debug</div>
+      <div class="chip drift r">mgx-disk-usage</div>
+      <div class="chip drift r">funcsea-domain-fix</div>
+      <div class="chip drift r">intercom-triage</div>
+      <div class="chip r">helpflow-billing-debug</div>
+      <div class="chip r">helpflow-cls-logs</div>
+      <div class="chip r">helpflow-intercom-doc</div>
+      <div class="chip r">intercom-reply</div>
+      <div class="chip r">jira-cli</div>
+      <div class="chip r">jira-issue-create</div>
+      <div class="chip r">ou-intercom-sop</div>
+    </div>
+    <div class="chips" data-seq="2800,80" style="left:1278px;top:352px;width:402px">
+      <div class="chip one r">langfuse</div>
+    </div>
+    <div class="label r" data-at="3400" style="left:0;top:672px">漂移证据<span class="muted" style="font-weight:400">　无软链，无同步脚本</span></div>
+    <ul class="ev3" data-seq="3600,200" style="left:0;top:712px;width:1680px">
+      <li class="r">旧的 Yearning source 名仍留在 <span class="mono">.agents</span> 副本</li>
+      <li class="r">旧版仍用 <span class="mono">jq | grep</span> 读大日志</li>
+      <li class="r"><span class="mono">.Codex/settings.local.json</span> 替换残留</li>
+    </ul>
+  </section>
+
+  <!-- S16 四层架构 -->
+  <section class="scene" data-dur="11000" data-end="6700" data-ch="03 Skills 写法" data-name="四层架构">
+    <div class="kick r" data-at="0"><b>03</b>Skills 写法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>四层分工：编排调领域，领域调能力，动作单独收口</span></span></h2>
+    <svg viewBox="0 0 1680 792" aria-hidden="true">
+      <path class="dr" data-at="1200" pathLength="1" d="M900 248V282"/>
+      <path class="dr" data-at="1300" pathLength="1" d="M390 282H1410"/>
+      <path class="dr" data-at="1500" pathLength="1" d="M390 282V306"/>
+      <path class="dr" data-at="1550" pathLength="1" d="M730 282V306"/>
+      <path class="dr" data-at="1600" pathLength="1" d="M1070 282V306"/>
+      <path class="dr" data-at="1650" pathLength="1" d="M1410 282V306"/>
+      <path class="ah f" data-at="1900" d="M384 306H396L390 316Z"/>
+      <path class="ah f" data-at="1900" d="M724 306H736L730 316Z"/>
+      <path class="ah f" data-at="1900" d="M1064 306H1076L1070 316Z"/>
+      <path class="ah f" data-at="1900" d="M1404 306H1416L1410 316Z"/>
+      <path class="dr" data-at="2700" pathLength="1" d="M390 380V414H1070"/>
+      <path class="dr" data-at="3000" pathLength="1" d="M730 414V438"/>
+      <path class="dr" data-at="3000" pathLength="1" d="M1070 414V438"/>
+      <path class="ah f" data-at="3300" d="M724 438H736L730 448Z"/>
+      <path class="ah f" data-at="3300" d="M1064 438H1076L1070 448Z"/>
+      <path class="dr" data-at="4100" pathLength="1" d="M750 216H212V612H230"/>
+      <path class="dr" data-at="4500" pathLength="1" d="M212 612V672H730V654"/>
+      <path class="ah f" data-at="4700" d="M230 606V618L240 612Z"/>
+      <path class="ah f" data-at="4900" d="M724 654H736L730 644Z"/>
+      <path class="dr" data-at="5300" pathLength="1" d="M1410 580V522"/>
+      <path class="ah f" data-at="5600" d="M1404 522H1416L1410 512Z"/>
+    </svg>
+    <div class="lyr r" data-at="600" style="left:0;top:184px"><b>编排</b><span>路由与政策</span></div>
+    <div class="lyr r" data-at="1400" style="left:0;top:316px"><b>领域排查</b><span>按问题类型</span></div>
+    <div class="lyr r" data-at="2400" style="left:0;top:448px"><b>能力</b><span>单一数据源</span></div>
+    <div class="lyr r" data-at="3800" style="left:0;top:580px"><b>动作</b><span class="accent">对外写入，先预览</span></div>
+    <div class="gn o r" data-at="800" style="left:750px;top:184px">ou-intercom-sop</div>
+    <div class="gn r" data-at="1700" style="left:240px;top:316px">mgx-debug</div>
+    <div class="gn r" data-at="1760" style="left:580px;top:316px">helpflow-billing-debug</div>
+    <div class="gn r" data-at="1820" style="left:920px;top:316px">mgx-disk-usage</div>
+    <div class="gn r" data-at="1880" style="left:1260px;top:316px">funcsea-domain-fix</div>
+    <div class="gn c r" data-at="2600" style="left:240px;top:448px">helpflow-cls-logs</div>
+    <div class="gn c r" data-at="3200" style="left:580px;top:448px">langfuse</div>
+    <div class="gn c r" data-at="3260" style="left:920px;top:448px">dc-download-chat-file</div>
+    <div class="gn c r" data-at="2700" style="left:1260px;top:448px">jira-cli</div>
+    <div class="gn a r" data-at="4600" style="left:240px;top:580px">intercom-reply</div>
+    <div class="gn a r" data-at="4800" style="left:580px;top:580px">intercom-triage</div>
+    <div class="gn a r" data-at="5100" style="left:1260px;top:580px">jira-issue-create</div>
+    <div class="strip r" data-at="6000" style="left:240px;top:700px;width:1320px"><b>共享脚本 · 隐式依赖</b><span><span class="mono">yearning-cli.py</span><span class="muted"> · 4 个 skill 共用</span></span><span><span class="mono">bounded-log-search.py</span><span class="muted"> · 2 个共用</span></span></div>
+  </section>
+
+  <!-- S17 范例拆解 -->
+  <section class="scene" data-dur="11500" data-end="3600" data-ch="03 Skills 写法" data-name="范例拆解">
+    <div class="kick r" data-at="0"><b>03</b>Skills 写法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>范例 helpflow-cls-logs：102 行分七节，每节管一个决策</span></span></h2>
+    <div class="mono muted small r" data-at="500" style="left:0;top:128px">SKILL.md</div>
+    <div class="fstrip wy" data-at="500" style="left:0;top:168px;width:96px;height:571px">
+      <i class="wx" data-at="1000" style="top:11px;height:34px"></i>
+      <i class="wx" data-at="1300" style="top:67px;height:84px"></i>
+      <i class="wx" data-at="1600" style="top:157px;height:101px"></i>
+      <i class="wx" data-at="1900" style="top:263px;height:62px"></i>
+      <i class="wx red" data-at="2200" style="top:330px;height:50px"></i>
+      <i class="wx" data-at="2500" style="top:386px;height:140px"></i>
+      <i class="wx" data-at="2800" style="top:532px;height:39px"></i>
+    </div>
+    <svg viewBox="0 0 1680 792" aria-hidden="true">
+      <path class="dr" data-at="1100" pathLength="1" d="M96 196H150L230 209H268"/>
+      <path class="dr" data-at="1400" pathLength="1" d="M96 277H150L230 291H268"/>
+      <path class="dr" data-at="1700" pathLength="1" d="M96 375H150L230 373H268"/>
+      <path class="dr" data-at="2000" pathLength="1" d="M96 462H150L230 455H268"/>
+      <path class="dr" data-at="2300" pathLength="1" d="M96 523H150L230 537H268" style="stroke:var(--red)"/>
+      <path class="dr" data-at="2600" pathLength="1" d="M96 624H150L230 619H268"/>
+      <path class="dr" data-at="2900" pathLength="1" d="M96 719H150L230 701H268"/>
+    </svg>
+    <ul class="anat" data-seq="1100,300" style="left:280px;top:168px;width:1400px">
+      <li class="r"><span class="mono">3–8</span><b>description</b><span>适用范围、能力、触发动作、与 Kibana 的优先级：一段同时管召回和路由</span></li>
+      <li class="r"><span class="mono">13–27</span><b>核心配置</b><span>固定用镜像预装的 <span class="mono">tccli</span>，列出禁止的 fallback；凭据只写变量名</span></li>
+      <li class="r"><span class="mono">29–46</span><b>只读契约</b><span>6 条白名单命令；SearchLog 的必填参数、Limit 上限与大小写</span></li>
+      <li class="r"><span class="mono">48–58</span><b>使用时机</b><span>先查 CLS 的五类场景；Kibana 查不到不代表请求不存在</span></li>
+      <li class="r hl"><span class="mono">60–68</span><b>查询流程</b><span>时间窗 → 元数据 → 最窄查询 → 上下文 → 判失败 → no-hit 修正一次 → 脱敏回复</span></li>
+      <li class="r"><span class="mono">70–94</span><b>命令示例</b><span>两个可直接套用的命令形状，参数全部占位或取自环境变量</span></li>
+      <li class="r"><span class="mono">96–102</span><b>排错</b><span>按“现象 → 允许的动作”写，每条同时写明禁止的动作</span></li>
+    </ul>
+  </section>
+
+  <!-- S18 写法模式 -->
+  <section class="scene" data-dur="12500" data-end="4400" data-ch="03 Skills 写法" data-name="写法模式">
+    <div class="kick r" data-at="0"><b>03</b>Skills 写法</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>八条写法值得照抄，四个反模式要避开</span></span></h2>
+    <div class="pgrid" data-seq="600,220" style="left:0;top:176px;width:1088px">
+      <div class="pcard r"><div class="n">01</div><div class="tt">description 写触发词，也写不触发</div><p class="d">引号列出触发短语，再补“不触发：代码开发…”</p></div>
+      <div class="pcard r"><div class="n">02</div><div class="tt">只读白名单契约</div><p class="d">逐条列允许的命令、必填参数与上限</p></div>
+      <div class="pcard r"><div class="n">03</div><div class="tt">no-hit 停止条件</div><p class="d">空结果记为 no-hit，最多修正一次就换源</p></div>
+      <div class="pcard r"><div class="n">04</div><div class="tt">写前预览，确认后执行</div><p class="d">展示目标与精确改动，批量操作逐条确认</p></div>
+      <div class="pcard r"><div class="n">05</div><div class="tt">references 渐进披露</div><p class="d">SKILL.md 只放流程，表结构放到 references</p></div>
+      <div class="pcard r"><div class="n">06</div><div class="tt">把踩过的坑写进正文</div><p class="d">列名陷阱、两套 ID 映射、接口兼容绕行</p></div>
+      <div class="pcard r"><div class="n">07</div><div class="tt">先识别输入，缺了就问</div><p class="d">先提取 chat ID 与环境，缺必需输入直接问</p></div>
+      <div class="pcard r"><div class="n">08</div><div class="tt">Red Flags 与 Checklist 收尾</div><p class="d">结尾自检，防止漏步</p></div>
+    </div>
+    <div class="label muted r" data-at="2600" style="left:1136px;top:176px">反模式</div>
+    <ul class="anti" data-seq="2800,300" style="left:1136px;top:216px;width:544px">
+      <li class="r"><div class="tt"><i>×</i>双目录手工复制</div><p class="d">4 个同名 skill 内容已不一致</p></li>
+      <li class="r"><div class="tt"><i>×</i>硬编码易变值</div><p class="d">日志主题 ID、内网地址直接写进正文</p></li>
+      <li class="r"><div class="tt"><i>×</i>长 SKILL.md 未拆分</div><p class="d">379 行、373 行的 skill 没有 references</p></li>
+      <li class="r"><div class="tt"><i>×</i>跨 skill 口径冲突</div><p class="d">source 名、数据库回退规则各说各话</p></li>
+    </ul>
+  </section>
+
+  <!-- S19 可复用要点与缺口 -->
+  <section class="scene" data-dur="10500" data-end="4500" data-ch="04 可复用要点" data-name="要点与缺口">
+    <div class="kick r" data-at="0"><b>04</b>可复用要点</div>
+    <h2 class="h2"><span class="m" data-at="200"><span>能力清单与 no-hit 停止值得复用，四个缺口待补</span></span></h2>
+    <div class="r" data-at="600" style="left:0;top:176px;width:828px"><div class="hbar wx" data-at="600"></div><div class="label">可复用</div></div>
+    <ul class="take" data-seq="900,150" style="left:0;top:232px;width:828px">
+      <li class="r"><b>01</b><span>能力清单单一来源 + preflight：只查变量名，不输出值</span></li>
+      <li class="r"><b>02</b><span>每个数据源写明 no-hit 停止规则</span></li>
+      <li class="r"><b>03</b><span>证据分级：已确认 / 强推断 / 待确认</span></li>
+      <li class="r"><b>04</b><span>写前预览，用户确认才执行</span></li>
+    </ul>
+    <div class="r" data-at="1700" style="left:852px;top:176px;width:828px"><div class="hbar ink wx" data-at="1700"></div><div class="label">缺口</div></div>
+    <ul class="take g" data-seq="2000,150" style="left:852px;top:232px;width:828px">
+      <li class="r"><b>01</b><span>部署版本代码回溯：本地仓都停在 main</span></li>
+      <li class="r"><b>02</b><span>假设清单模板：缺少否证条件</span></li>
+      <li class="r"><b>03</b><span>时区规则只记在案例里，未进 skill 正文</span></li>
+      <li class="r"><b>04</b><span>双目录同步：无软链，也无脚本</span></li>
+    </ul>
+    <div class="wx" data-at="3000" style="left:0;top:548px;width:1254px;height:2px;background:var(--ink)"></div>
+    <h2 style="left:0;top:580px;width:1230px;font-size:48px;font-weight:700;line-height:1.25"><span class="m" data-at="3200"><span>AgentHelm 可借鉴：能力清单 + no-hit 停止。</span></span></h2>
+    <p class="muted r" data-at="3800" style="left:0;top:720px">基于 HelpFlow 当前工作树（dev_ocj，含未提交改动），2026-10-21</p>
+    <div class="redblock wy" data-at="3000" style="left:1278px;top:548px;width:402px;height:244px">
+      <div class="r" data-at="3600">HelpFlow</div>
+      <p class="small r" data-at="3700">框架 · 定位方法 · Skills 写法</p>
+    </div>
+  </section>
+
+  <nav class="progress" id="progress" aria-label="场景"></nav>
+  <div class="hint" id="hint">点击 / → 下一页 · ← 上一页 · A 自动播放</div>
+  <button class="mode" id="mode" type="button" aria-pressed="false" title="切换自动播放（A）"><i></i>自动播放</button>
+</div>
+<div id="rotate">横屏观看效果更佳</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const fit = () => document.documentElement.style.setProperty('--s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  addEventListener('resize', fit); fit();
+
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = p => RM ? (p > 0 ? 1 : 0) : 1 - Math.pow(1 - p, 3);
+
+  document.querySelectorAll('[data-seq]').forEach(p => {
+    const [a, b] = p.dataset.seq.split(',').map(Number);
+    [...p.children].forEach((c, i) => { if (!c.dataset.at) c.dataset.at = a + i * b; });
+  });
+
+  const hooks = {
+    // 红色游标沿时间线移动：data-times 为各节点点亮时刻，data-gap 为节点间距
+    flow(t, el) {
+      const runner = el.querySelector('.runner');
+      const T = runner.dataset.times.split(',').map(Number), GAP = +runner.dataset.gap, MOVE = 700;
+      let x = 0;
+      for (let i = 1; i < T.length; i++) {
+        const p = clamp((t - (T[i] - MOVE)) / MOVE);
+        if (p > 0) x = (i - 1) * GAP + ease(p) * GAP;
+      }
+      runner.style.transform = `translateX(${x}px)`;
+      runner.style.opacity = clamp((t - (T[0] - 300)) / 300);
+    }
+  };
+
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({
+    el, dur: +el.dataset.dur, name: el.dataset.name, ch: el.dataset.ch, hook: hooks[el.dataset.hook],
+    cues: [...el.querySelectorAll('[data-at]')].map(e => ({ e, at: +e.dataset.at })),
+    counts: [...el.querySelectorAll('[data-count]')].map(e => ({ e, n: +e.dataset.count, cs: +e.dataset.cs, cd: +e.dataset.cd }))
+  }));
+
+  const progress = document.getElementById('progress');
+  const segs = scenes.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg' + (i > 0 && s.ch !== scenes[i - 1].ch ? ' ch' : '');
+    b.setAttribute('aria-label', `第 ${i + 1} 幕：${s.ch} · ${s.name}`);
+    b.innerHTML = '<i></i>';
+    b.addEventListener('click', e => { e.stopPropagation(); if (e.detail) b.blur(); go(i); });
+    progress.append(b);
+    return b;
+  });
+  const label = document.getElementById('sceneLabel');
+  const hint = document.getElementById('hint');
+  const pad = n => String(n).padStart(2, '0');
+  const setLabel = () => { label.textContent = `${scenes[cur].ch}　${pad(cur + 1)} / ${pad(scenes.length)}　${scenes[cur].name}`; };
+
+  const modeBtn = document.getElementById('mode');
+  const last1 = scenes.length - 1;
+  scenes.forEach(s => { s.end = +s.el.dataset.end || s.dur; });
+  let auto = new URLSearchParams(location.search).get('mode') === 'auto';
+  let cur = 0, t = 0, paused = false, last = performance.now(), leaving = null;
+
+  function reset(s) {
+    s.el.classList.remove('is-active', 'is-leaving');
+    s.cues.forEach(c => c.e.classList.remove('on'));
+  }
+  function finishLeave() { reset(leaving); leaving = null; }
+  function render(s) {
+    for (const c of s.cues) if (t >= c.at) c.e.classList.add('on');
+    for (const c of s.counts) c.e.textContent = Math.round(c.n * ease(clamp((t - c.cs) / c.cd)));
+    if (s.hook) s.hook(t, s.el);
+  }
+  // final：直接显示目标页最终画面（不播入场、旧页不淡出）
+  function go(i, final = false) {
+    if (auto) i = (i + scenes.length) % scenes.length;
+    else if (i < 0 || i > last1) return;
+    if (leaving) finishLeave();
+    const old = scenes[cur];
+    cur = i;
+    const s = scenes[cur];
+    if (final || RM) {
+      reset(old);
+      if (old !== s) reset(s);
+      t = s.end;
+      render(s);              // 页面未激活时 transition 为 none，cue 直接落到终态
+      void s.el.offsetWidth;
+      s.el.classList.add('is-active');
+    } else {
+      old.el.classList.remove('is-active');
+      old.el.classList.add('is-leaving');
+      leaving = old;
+      t = -220;
+    }
+    setLabel();
+  }
+  const next = () => go(cur + 1);
+  const prev = () => go(cur - 1, !auto);
+  function setHint() {
+    hint.textContent = !auto ? '点击 / → 下一页 · ← 上一页 · A 自动播放'
+      : paused ? '已暂停 · 空格 / 点击 继续' : '空格 / 点击 暂停 · ← → 切换 · A 手动模式';
+    modeBtn.setAttribute('aria-pressed', String(auto));
+  }
+  function setPaused(v) { paused = v; if (v) t = Math.max(t, 0); setHint(); }  // 换页空档内暂停时先激活新页，避免停在空白
+  function setAuto(v) {
+    auto = v; paused = false;
+    if (!auto) t = Math.min(t, scenes[cur].end);
+    setHint();
+  }
+
+  function tick(now) {
+    const dt = Math.min(now - last, 100);
+    last = now;
+    const s = scenes[cur];
+    if (auto) { if (!paused) t += dt; }
+    else t = Math.min(t + dt, s.end);
+    if (t >= 0 && !s.el.classList.contains('is-active')) {
+      if (leaving) finishLeave();
+      void s.el.offsetWidth;
+      s.el.classList.add('is-active');
+    }
+    if (t >= 0) render(s);
+    segs.forEach((b, i) => {
+      b.classList.toggle('cur', i === cur);
+      b.firstChild.style.setProperty('--p', i < cur ? 1 : i > cur ? 0 : clamp(t / (auto ? s.dur : s.end)));
+    });
+    if (auto && t >= s.dur) go(cur + 1);
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.closest && e.target.closest('button') && (e.code === 'Space' || e.key === 'Enter')) return;
+    const k = e.key;
+    if (k === 'a' || k === 'A') setAuto(!auto);
+    else if (k === 'ArrowRight' || k === 'PageDown') { e.preventDefault(); next(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.code === 'Space') { e.preventDefault(); auto ? setPaused(!paused) : next(); }
+  });
+  stage.addEventListener('click', () => { auto ? setPaused(!paused) : next(); });
+  modeBtn.addEventListener('click', e => { e.stopPropagation(); if (e.detail) modeBtn.blur(); setAuto(!auto); });
+
+  setHint();
+  if (RM) go(0, true);
+  setLabel();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

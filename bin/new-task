@@ -12,21 +12,40 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('slug')
 parser.add_argument('--important', action='store_true')
 parser.add_argument('--kind', choices=('claude', 'codex'))
+parser.add_argument('--entry', choices=('app.codex', 'app.ccd', 'cli.claude', 'cli.codex'))
+parser.add_argument('--session')
+parser.add_argument('--app-params', default='{}', help='JSON host defaults and operation parameters')
 args = parser.parse_args()
 if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', args.slug):
     parser.error('slug must be kebab-case')
 root = Path(__file__).resolve().parent.parent
-config = Path.home() / '.config/research'
+from _workspace import CONFIG as config, owned, runtime_entry
+try:
+    entry = runtime_entry(args.entry, args.session)
+    if not (entry and entry.startswith('app.')) and args.app_params != '{}':
+        parser.error('--app-params requires a bound App session')
+    if entry and entry.startswith('app.'):
+        if args.kind:
+            parser.error('App task does not accept CLI --kind')
+        from _app_sessions import load_state, require_dispatcher
+        from _app_requests import model_parameters
+        role = 'lead_important' if args.important else 'lead'
+        model_parameters(require_dispatcher(load_state(), args.session), 'create', role,
+                         json.loads(args.app_params))
+except (ValueError, OSError) as error:
+    parser.error(str(error))
+
 env = config / 'env'
-if env.exists() and env.read_text().strip() == 'cli-herdr':
-    listing = json.loads(subprocess.check_output(['herdr', 'agent', 'list'], text=True))
-    agents = listing['result'] if isinstance(listing, dict) else listing
-    if isinstance(agents, dict):
-        agents = agents['agents']
-    count = sum(agent['name'].startswith('lead-') for agent in agents)
-    if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '4')):
+if not (entry and entry.startswith('app.')) and env.exists() and env.read_text().strip() == 'cli-herdr':
+    if os.environ.get('HERDR_ENV') != '1':
+        parser.error('run inside Herdr, or select cli-plain in .agenthelm/config/env')
+    # herdr agent list has no agent names; spawn-lead labels each Lead tab "lead-<task>".
+    listing = json.loads(subprocess.check_output(['herdr', 'tab', 'list'], text=True))
+    tabs = listing['result']['tabs']
+    count = sum(tab.get('label', '').startswith('lead-') for tab in tabs)
+    if count >= int(os.environ.get('RESEARCH_MAX_LEADS', '10')):
         parser.error('Lead concurrency limit reached')
-experiments = root / 'experiments'
+experiments = owned(root / 'experiments')
 experiments.mkdir(exist_ok=True)
 numbers = [int(match[1]) for parent in (experiments, experiments / 'archive', root / 'archive')
            if parent.exists() for path in parent.iterdir()
@@ -39,10 +58,17 @@ card = '' if sys.stdin.isatty() else sys.stdin.read()
 if not card.strip():
     card = (root / 'templates/task-card.md').read_text()
 (task / 'README.md').write_text(card.replace('<task-id>', ident))
-subprocess.run([str(root / 'bin/status'), 'running', 'Lead reading task card'], cwd=task)
+if not (entry and entry.startswith('app.')):
+    subprocess.run([str(root / 'bin/status'), 'running', 'Lead reading task card'], cwd=task)
 command = [str(root / 'bin/spawn-lead'), str(task)]
 if args.important:
     command.append('--important')
 if args.kind:
     command.extend(['--kind', args.kind])
+if args.entry:
+    command.extend(['--entry', args.entry])
+if args.session:
+    command.extend(['--session', args.session])
+if args.app_params != '{}':
+    command.extend(['--app-params', args.app_params])
 subprocess.run(command, check=True)

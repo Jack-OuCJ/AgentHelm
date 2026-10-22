@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Start a Lead for one task using ~/.config/research/env.
+"""Start a Lead for one task using .agenthelm/config/env.
 
-Optional ~/.config/research/roles key=value lines: kind, model, effort.
+Optional .agenthelm/config/roles key=value lines: kind, model, effort.
 """
 import argparse
 import json
+import os
+from _workspace import CONFIG, task_directory, bootstrap, runtime_environment, runtime_entry
 from pathlib import Path
 import re
 import shutil
@@ -17,18 +19,33 @@ parser.add_argument('task_dir')
 parser.add_argument('--kind', choices=('claude', 'codex'))
 parser.add_argument('--important', action='store_true')
 parser.add_argument('--copy', action='store_true', help='copy the start prompt to the clipboard')
+parser.add_argument('--entry', choices=('app.codex', 'app.ccd', 'cli.claude', 'cli.codex'))
+parser.add_argument('--session')
+parser.add_argument('--app-params', default='{}', help='JSON host defaults and operation parameters')
 args = parser.parse_args()
 
-home = Path.home()
-task = Path(args.task_dir).expanduser().resolve()
-if not task.is_dir():
-    raise SystemExit(f'spawn-lead: not a directory: {task}')
-
-config = home / '.config/research'
-env_file = config / 'env'
-environment = env_file.read_text().strip() if env_file.exists() else 'cli-plain'
-if environment not in ('cli-herdr', 'cli-plain', 'app'):
-    raise SystemExit(f'spawn-lead: unknown environment in {env_file}: {environment}')
+task = task_directory(args.task_dir)
+config = CONFIG
+try:
+    entry = runtime_entry(args.entry, args.session, task)
+    if not (entry and entry.startswith('app.')) and args.app_params != '{}':
+        parser.error('--app-params requires a bound App session')
+    environment, _ = runtime_environment(entry)
+    if entry and entry.startswith('app.'):
+        if args.kind or args.copy:
+            parser.error('App Lead does not accept CLI --kind or --copy')
+        from _app_sessions import transaction
+        from _app_requests import prepare
+        payload = json.loads(args.app_params)
+        if not isinstance(payload, dict):
+            parser.error('App parameters must be a JSON map')
+        payload['important'] = args.important
+        with transaction() as state:
+            request = prepare(state, args.session, 'create', task, payload)
+        print(json.dumps(request, ensure_ascii=False))
+        raise SystemExit(0)
+except (ValueError, OSError) as error:
+    parser.error(str(error))
 
 roles = {}
 role = 'lead_important' if args.important else 'lead'
@@ -43,19 +60,20 @@ else:
             key, separator, value = line.strip().partition('=')
             if separator and key.strip() and not key.strip().startswith('#'):
                 roles[key.strip()] = value.strip()
-kind = args.kind or roles.get('kind', 'claude')
+kind = args.kind or (entry.split('.')[1] if entry else None) or roles.get('kind', 'claude')
 if kind not in ('claude', 'codex'):
     parser.error('Lead provider requires --kind claude|codex')
 model = roles.get('model') if kind == roles.get('kind', 'claude') else None
 effort = roles.get('effort') if kind == roles.get('kind', 'claude') else None
 
-prompt = (f'Lead task: {task}\n'
-          f'Read the task card in {task} (README.md, or AGENTS.md if present) and the root AGENTS.md, then prepare the confirmation '
-          'version of the alignment (question, method, primary metric, scope, stopping '
-          'conditions, authorized files, acceptance commands) and wait for the user to '
-          'confirm before executing. If the task card explicitly says pre-authorized, proceed within its authorized scope without another alignment confirmation.')
+model = None if model == 'default' else model
+prompt = bootstrap('lead', task, entry=entry) + (
+    f'读取 {task / "README.md"}，确认问题、方法、指标、范围、停止条件、可写文件和验收命令。'
+    '授权和验收要求已明确时直接执行；仅对缺失且影响执行的关键事项询问，避免重复确认。')
 
 if environment == 'cli-herdr':
+    if os.environ.get('HERDR_ENV') != '1':
+        raise SystemExit('spawn-lead: run inside Herdr or select cli-plain')
     herdr = shutil.which('herdr')
     if not herdr:
         raise SystemExit('spawn-lead: herdr not found; install it with bin/install-component herdr')

@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Register the current App Dispatcher, start a CLI, or print read-only context."""
+import argparse
+import os
+from _app_sessions import ENTRIES, load_state, register, require_dispatcher, transaction
+from _workspace import ROOT, bootstrap, runtime_environment
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--kind', choices=('claude', 'codex'))
+parser.add_argument('--entry', choices=(*ENTRIES, 'cli.claude', 'cli.codex'))
+parser.add_argument('--session')
+parser.add_argument('--print', action='store_true', dest='print_only')
+args = parser.parse_args()
+try:
+    state = load_state()
+    binding = state['sessions'].get(args.session)
+    if binding and args.entry and args.entry != binding['entry']:
+        parser.error('entry conflicts with bound session')
+    entry = binding['entry'] if binding else args.entry
+    environment, _ = runtime_environment(entry)
+    if environment == 'app':
+        if args.kind:
+            parser.error('App Dispatcher does not accept CLI --kind')
+        if args.print_only:
+            if binding:
+                require_dispatcher(state, args.session)
+                role = 'dispatcher'
+            else:
+                role = 'App 会话预览（未注册，无调度权限）'
+        else:
+            if entry not in ENTRIES or not args.session:
+                parser.error('App Dispatcher requires --entry and --session from verified native identity')
+            # The host checks actual identity before this logical workspace registration.
+            with transaction() as current:
+                register(current, args.session, entry)
+            role = 'dispatcher'
+        print(bootstrap(role, entry=entry, session=args.session))
+    elif state['dispatcher'] or state.get('handoff'):
+        if not args.print_only:
+            parser.error('Dispatcher conflict: workspace already has an active App Dispatcher')
+        print(bootstrap('只读观察者（已有 App Dispatcher，无调度权限）', entry=entry))
+    else:
+        if args.session:
+            parser.error('unknown session; App registration requires explicit --entry')
+        kind = args.kind or (entry.split('.')[1] if entry else 'claude')
+        if entry and entry != 'cli.' + kind:
+            parser.error('CLI --kind conflicts with --entry')
+        prompt = bootstrap('dispatcher', entry=entry)
+        if args.print_only:
+            print(prompt)
+        else:
+            os.chdir(ROOT)
+            os.execvp(kind, [kind, prompt])
+except (ValueError, OSError) as error:
+    parser.error(str(error))

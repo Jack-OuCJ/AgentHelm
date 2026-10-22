@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+from _workspace import CONFIG
 import re
 import subprocess
 
@@ -11,7 +12,7 @@ parser.add_argument('root', nargs='?', default='.')
 parser.add_argument('--git-dir', type=Path, help='scan history from an external Git directory')
 args = parser.parse_args()
 root = Path(args.root).resolve()
-terms = Path.home() / '.config/research/scrub-terms.txt'
+terms = CONFIG / 'scrub-terms.txt'
 patterns = [r'sk-[A-Za-z0-9]{16,}', r'gh[pousr]_', 'ntn' + '_', 'secret' + '_',
             r'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----', r'token\s*[=:]\s*\S{16,}']
 if terms.exists():

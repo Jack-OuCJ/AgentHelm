@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Manage workspace App session ownership through a JSON CLI."""
+import argparse
+import json
+import sys
+
+from _app_requests import prepare, result
+from _app_sessions import claim, finish, record_capabilities, register, release, show, transaction
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    for command in ('register', 'show', 'capabilities'):
+        subparser = commands.add_parser(command)
+        subparser.add_argument('--session', required=True)
+        if command == 'register':
+            subparser.add_argument('--entry', choices=('app.codex', 'app.ccd'), required=True)
+    preparing = commands.add_parser('prepare')
+    preparing.add_argument('--session', required=True)
+    preparing.add_argument('--operation', choices=('create', 'executor', 'read', 'wait', 'followup'), required=True)
+    preparing.add_argument('--task', required=True)
+    receiving = commands.add_parser('result')
+    receiving.add_argument('--session', required=True)
+    receiving.add_argument('--request', required=True)
+    releasing = commands.add_parser('release')
+    releasing.add_argument('--session', required=True)
+    releasing.add_argument('--to', required=True)
+    claiming = commands.add_parser('claim')
+    claiming.add_argument('--session', required=True)
+    claiming.add_argument('--entry', choices=('app.codex', 'app.ccd'), required=True)
+    finishing = commands.add_parser('finish')
+    finishing.add_argument('--session', required=True)
+    finishing.add_argument('--task', required=True)
+    args = parser.parse_args()
+    payload = json.load(sys.stdin) if args.command in ('prepare', 'result', 'capabilities') else None
+    with transaction(readonly=args.command == 'show') as state:
+        if args.command == 'register':
+            output = register(state, args.session, args.entry)
+        elif args.command == 'capabilities':
+            output = record_capabilities(state, args.session, payload)
+        elif args.command == 'prepare':
+            output = prepare(state, args.session, args.operation, args.task, payload)
+        elif args.command == 'result':
+            output = result(state, args.session, args.request, payload)
+        elif args.command == 'release':
+            output = release(state, args.session, args.to)
+        elif args.command == 'claim':
+            output = claim(state, args.session, args.entry)
+        elif args.command == 'finish':
+            output = finish(state, args.session, args.task)
+        else:
+            output = show(state, args.session)
+    print(json.dumps(output, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError) as error:
+        print(f'app-session: {error}', file=sys.stderr)
+        sys.exit(1)

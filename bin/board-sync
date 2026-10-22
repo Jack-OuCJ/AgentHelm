@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Mirror task STATUS to the configured project board; --all retries all tasks."""
+import argparse
+from datetime import datetime
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from _workspace import ROOT, CONFIG, STATE, owned, task_directory, write
+
+CONFIG_FILE = CONFIG / 'board.json'
+
+
+def cli(config, action, *args, artifact=False):
+    command = ['lark-cli', 'base', action, '--base-token', config['base_token'],
+               '--table-id', config['table_id'], '--profile', config['profile'], '--as', 'user', *args]
+    env = dict(os.environ, LARKSUITE_CLI_NO_UPDATE_NOTIFIER='1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER='1')
+    result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True, timeout=45)
+    try:
+        data = json.loads(result.stdout if result.returncode == 0 else result.stderr)
+    except ValueError:
+        raise RuntimeError(f'{action}: CLI exit {result.returncode}; no valid JSON response')
+    if result.returncode or data.get('ok') is False:
+        error = data.get('error', {})
+        raise RuntimeError(f'{action}: {error.get("type", "CLI error")}/{error.get("subtype", result.returncode)}')
+    if artifact:
+        if data.get('manifest_version') != 'v1' or data.get('has_more') is not False:
+            raise RuntimeError(f'{action}: incomplete or unsupported record artifact')
+    elif data.get('ok') is not True:
+        raise RuntimeError(f'{action}: missing success confirmation')
+    return data
+
+
+def records(config, action, name, *args):
+    output = owned(STATE / (name + '.ndjson'))
+    owned(output.with_suffix('.manifest.json'))
+    manifest = cli(config, action, *args, '--format', 'ndjson', '--output',
+                   str(output.relative_to(ROOT)), '--overwrite', artifact=True)
+    rows = [json.loads(line) for line in output.read_text().splitlines() if line.strip()]
+    if len(rows) != manifest['records_count'] or any(not row.get('record_id') for row in rows):
+        raise RuntimeError(f'{action}: inconsistent record IDs or count')
+    return rows, manifest
+
+
+def snapshot(task, config):
+    status = owned(task / 'STATUS')
+    parts = status.read_text().strip().split('|', 3)
+    if len(parts) != 4:
+        raise ValueError('STATUS must contain state | task ID | summary | cost')
+    state, ident, summary, cost = (part.strip() for part in parts)
+    if state not in config['statuses'] or ident != task.name:
+        raise ValueError('unknown state or STATUS task ID does not match directory')
+    readme = owned(task / 'README.md').read_text()
+    question = re.search(r'^- question:\s*(.+)$', readme, re.M)
+    title = re.search(r'^#\s+(.+)$', readme, re.M)
+    headings = list(re.finditer(r'^#{1,2} (?:Conclusion|结论)[^\n]*(?:\n|$)', readme, re.M))
+    conclusion = re.split(r'(?m)^#{1,2} ', readme[headings[-1].end():], maxsplit=1)[0].strip() if headings else ''
+    logical = {
+        'key': config['workspace_id'] + ':' + ident, 'task_id': ident,
+        'title': question[1].strip() if question else title[1].strip() if title else ident,
+        'workspace': str(ROOT), 'status': [config['statuses'][state]], 'summary': summary,
+        'lead': ('lead-' + re.sub(r'[^a-z0-9_-]', '-', ident.lower()).strip('-_'))[:32],
+        'updated': datetime.fromtimestamp(status.stat().st_mtime).astimezone().isoformat(timespec='milliseconds'),
+        'conclusion': conclusion, 'cost': cost,
+    }
+    return {config['fields'][key]: value for key, value in logical.items()}
+
+
+def verify(config, record_id, expected):
+    args = ['--record-id', record_id]
+    for field in expected:
+        args += ['--field-id', field]
+    for attempt in range(3):
+        rows, manifest = records(config, '+record-get', 'feishu-readback', *args)
+        columns = {spec.get('field_id'): name for name, spec in manifest.get('columns', {}).items()}
+        if len(rows) == 1 and rows[0]['record_id'] == record_id:
+            matches = True
+            for field, value in expected.items():
+                observed = rows[0].get(columns.get(field))
+                if field == config['fields']['updated'] and isinstance(observed, str):
+                    matches &= datetime.fromisoformat(observed.replace('Z', '+00:00')) == datetime.fromisoformat(value)
+                else:
+                    matches &= observed == value or (value == '' and observed is None)
+            if matches:
+                return
+        if attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError('write returned success but readback does not match; retry synchronization later')
+
+
+def sync(task, config):
+    if config.get('backend') != 'feishu':
+        raise ValueError('unsupported project board backend')
+    pending = owned(task / '.feishu-pending')
+    STATE.mkdir(parents=True, exist_ok=True)
+    with owned(STATE / 'feishu-sync.lock').open('a') as lock:
+        # Read the latest STATUS after serializing this workspace's remote writers.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            expected = snapshot(task, config)
+            key_field = config['fields']['key']
+            lookup = json.dumps({'logic': 'and', 'conditions': [[key_field, '==', expected[key_field]]]}, ensure_ascii=False)
+            rows, _ = records(config, '+record-list', 'feishu-lookup', '--field-id', key_field, '--filter-json', lookup)
+            if len(rows) > 1:
+                raise RuntimeError('duplicate task keys on remote board; resolve them before syncing')
+            if rows:
+                record_id = rows[0]['record_id']
+                response = cli(config, '+record-batch-update', '--json', json.dumps(
+                    {'update_records': {record_id: expected}}, ensure_ascii=False))
+            else:
+                response = cli(config, '+record-batch-create', '--json', json.dumps(
+                    {'create_records': [expected]}, ensure_ascii=False))
+                ids = response['data']['record_id_list']
+                if len(ids) != 1:
+                    raise RuntimeError('create did not return exactly one record ID')
+                record_id = ids[0]
+            if response.get('data', {}).get('ignored_fields'):
+                raise RuntimeError('board schema rejected one or more configured fields')
+            verify(config, record_id, expected)
+            pending.unlink(missing_ok=True)
+            print(f'board-sync: {task.name} -> Feishu {record_id} (verified)')
+        except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as error:
+            write(pending, str(error) + '\n')
+            raise
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('task_dir', nargs='?')
+    parser.add_argument('--all', action='store_true', dest='all_tasks')
+    args = parser.parse_args()
+    if bool(args.task_dir) == args.all_tasks:
+        parser.error('pass task_dir or --all')
+    tasks = [task_directory(args.task_dir)] if args.task_dir else [
+        task_directory(path.parent) for path in sorted(ROOT.glob('experiments/*/STATUS'))]
+    if not CONFIG_FILE.exists():
+        return max((subprocess.run([str(ROOT / 'bin/notion-sync'), str(task)]).returncode
+                    for task in tasks), default=0)
+    config = json.loads(owned(CONFIG_FILE).read_text())
+    failed = False
+    for task in tasks:
+        try:
+            sync(task, config)
+        except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as error:
+            failed = True
+            print(f'board-sync: {task.name}: {error}; local STATUS retained', file=sys.stderr)
+    subprocess.run([str(ROOT / 'bin/board')], stdout=subprocess.DEVNULL, check=True)
+    return int(failed)
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit('board-sync: ' + str(error))

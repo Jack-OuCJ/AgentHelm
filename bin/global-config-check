@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Record or compare hashes and symlink targets of existing global configuration."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import os
+from _workspace import STATE, write
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--record', action='store_true')
+args = parser.parse_args()
+home = Path.home()
+files = ['.agents/AGENTS.md', '.agents/ENGINEERING.md', '.claude/CLAUDE.md',
+         '.claude/AGENTS.md', '.claude/settings.json', '.claude/settings.local.json',
+         '.codex/AGENTS.md', '.codex/config.toml', '.codex/hooks.json',
+         '.gemini/AGENTS.md', '.gemini/config/AGENTS.md', '.cursor/rules/global-rules.mdc']
+directories = ['.agents/rules', '.agents/skills', '.claude/skills', '.codex/skills',
+               '.gemini/config/skills', '.config/research']
+paths = set(home / name for name in files + directories)
+for name in directories:
+    directory = home / name
+    if directory.is_dir():
+        for base, dirs, names in os.walk(directory, followlinks=False):
+            paths.update(Path(base) / item for item in dirs + names)
+snapshot = {}
+for path in sorted(paths):
+    if path.is_symlink():
+        value = ['link', os.readlink(path)]
+    elif path.is_file():
+        value = ['file', hashlib.sha256(path.read_bytes()).hexdigest()]
+    else:
+        value = ['directory' if path.is_dir() else 'absent']
+    snapshot[str(path.relative_to(home))] = value
+target = STATE / 'global-config-baseline.json'
+if args.record:
+    if target.exists():
+        parser.error('baseline already exists; compare it instead of overwriting')
+    write(target, json.dumps(snapshot, ensure_ascii=False, indent=2) + '\n')
+    print(f'global-config: recorded {len(snapshot)} entries (hashes only)')
+elif not target.exists():
+    parser.error('record a baseline first')
+else:
+    before = json.loads(target.read_text())
+    changed = sorted(key for key in before.keys() | snapshot.keys() if before.get(key) != snapshot.get(key))
+    if changed:
+        print('global-config: changed entries\n' + '\n'.join(changed))
+        raise SystemExit(1)
+    print(f'global-config: unchanged ({len(snapshot)} entries)')
