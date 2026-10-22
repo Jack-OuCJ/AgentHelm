@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 from _toml import loads
-from _models import command, generate, resolve_app, select, validate
+from _models import command, generate, resolve_app, select, validate, write_ccd_agents
 
 ROOT = Path(__file__).resolve().parent.parent
 from _workspace import CONFIG as WORKSPACE_CONFIG
@@ -55,6 +55,7 @@ def main():
         return int(failed)
     else:
         generate(config)
+        write_ccd_agents(config)
         subprocess.run([str(ROOT / 'bin/kb'), 'sync-agents'], check=True)
         print(MARKDOWN.read_text(), end='')
     return 0

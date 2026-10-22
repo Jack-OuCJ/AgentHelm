@@ -51,7 +51,17 @@ bin/codex-session-evidence --session EXECUTOR_ID --kind executor \
 
 即使子代理日志带父历史，也只接受精确子代理当前 turn；不能从 helper 将要验证的日志反向挑选 turn，也不能使用父 turn。子代理须真实在任务 workdir 执行授权动作。created 回执另含 native=true、parent_session=LEAD_ID，以及 evidence.native、evidence.parent_session。Executor 的原生来源与父绑定由 helper 检查；fork 会话不能作为独立 Lead。
 
-## 5. 读取、等待与追加
+## 5. CCD 模型与原生 Executor
+
+- Dispatcher 的模型由用户在 CCD 中用 `/model` 手动选择，不读 roles.toml。
+- Lead 先起 session，再切到 `bin/models resolve ROLE --entry app.ccd` 解析出的原生 ID。会话不能改自己的模型，由用户 `/model` 或其他会话切换。核对以 Lead 实际轮次的 model 为准。
+- Executor 角色的 model/effort 写在 `roles.ROLE.app.ccd`，填完整原生 ID。`bin/models` 据此生成 `.claude/agents/agenthelm-ROLE.md`，frontmatter 固定 model 与 effort；未配置的字段写 inherit 或省略，沿用所属 Lead 的实际值，不回落 `app.defaults.ccd`。
+- CCD 只在会话启动时加载 agent 文件。已验证 Lead 项目目录为任务目录时能加载工作区根 `.claude/agents/`；委派前仍确认 Agent 工具的可用列表含 request.subagent_type。改 roles.toml 后先运行 `bin/models`，再重启 Lead；文件缺失或过期时 `run-executor` 拒绝生成请求。
+- 委派用 Agent 工具的 `subagent_type=request.subagent_type`，不传 model。Agent 的 model 别名由 CCD 映射，不代表实际模型，不用于按角色指定。
+- 回执 model/effort 填子代理 transcript 读回的 `requestedModel` 与 `effort`，须与 request.effective_request 完全相等；另填 `served_model` 为 `message.model` 及其 evidence，须等于去掉 `[1m]` 后的请求 model。Executor 角色配置可带 `[1m]` 开启 1M 上下文，对应的 model/effort 组合须先由 Dispatcher 登记进能力。
+- transcript 在 Lead 项目目录的 `<lead-session>/subagents/agent-<agentId>.jsonl`。其 `cwd` 字段是会话项目目录，cwd 证据取子代理在任务目录执行的 `pwd` 输出。
+
+## 6. 读取、等待与追加
 
 - read：先 prepare，再用 `read_thread` 精确读取 request.target_session 最新内容。将最新 turn/item 标识派生为稳定 revision，context 保留当前用户要求、执行状态与需输入事项。成功 result 使用 status=observed、session/workspace/cwd、state、revision、cursor、context、source 及各字段观察 evidence。idle/working/blocked/done 是会话观察；任务验收仍看本地 STATUS 和产物。查询不到或无法确认用 missing/unknown，保留绑定，不自动重建。
 - cursor 必须带来源：read 可保存 `read:<revision>`；wait 保存 `wait:<原生事件游标>`。`read_thread.page.nextCursor` 是向前读取历史的分页游标，不能当作 wait 的事件游标。
@@ -59,8 +69,10 @@ bin/codex-session-evidence --session EXECUTOR_ID --kind executor \
 - followup：先完成一次新的 read prepare/result，根据最新上下文编写 brief，并用这次观察的请求 ID、revision、cursor 填入 observation、revision、cursor 准备请求；从 wait 唤醒也先做 read，不直接沿用 wait 游标。发送前再次原生 read，以同一派生规则核对最新 revision 和 `read:<revision>` 与 request.revalidate 一致。不要把 read 游标与 `wait:<原生事件游标>` 比较；两者来源不同。有人工新输入或同来源 revision/cursor 变化时，用 stale、sent=false 回写并重新观察，不能重放旧任务。
 - 仍一致时调用 `send_message_to_thread`，只传目标和追加 prompt，省略 model/thinking，保留实际配置。成功 result 使用 status=sent、sent=true、session/workspace/cwd、source、实际 model/effort、revalidated_revision/revalidated_cursor 及同名 evidence。无法证明实际设置时不能报成功。网络未知或排队保留未决请求，禁止盲目重发；明确未发送用 failed、sent=false。
 
-## 6. 交接与结束
+## 7. 交接与结束
 
 旧主控执行 `bin/app-session release --session OLD --to NEW`，新主控核验自身身份后 `bin/app-session claim --session NEW --entry ENTRY`。同 App 接管保留 Lead；未决写请求会阻止交接。新主控重新核查当前工具能力。旧主控恢复时只读，不恢复 Dispatcher 权限；接管后先读取最新上下文，不重发旧 brief。
 
 验收完成且 STATUS=done 后，`bin/app-session finish --session DISPATCHER_ID --task ABS_TASK` 停止活跃跟踪，保留聊天和历史。用户仍能进入 Lead。自动归档、删除和常驻监控均不属于本协议。
+
+用户明确要求继续已结束任务时，当前 Dispatcher 或该任务原绑定 Lead 先用 `bin/app-session resume --session OWN_ID --task ABS_TASK --reason "用户本次授权"` 恢复活跃绑定，再由 Lead 用 `bin/status running "本次工作"` 更新本地状态。恢复保留原会话、模型和历史，检查并发上限与未决写请求；交接尚未完成时不可恢复。旧观察失效，Dispatcher 追加前需重新 read；Lead 可按 executor 的 prepare、原生工具、result 流程继续委派。`resume` 本身不创建会话、不发送消息，也不改 STATUS。

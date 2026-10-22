@@ -50,6 +50,8 @@ App 协议与 Herdr 可以共存，已有会话按自身 entry/session 绑定恢
 
 Lead 委派使用原生子代理；`run-executor --print` 只输出不可执行的预览，不保存待执行请求。`codex-session-evidence` 只读精确会话及轮次的实际模型/强度，不能证明可见性、任务动作或默认来源。读取、等待、追加均按请求/回执执行；人工调整后先重新观察。
 
+已结束任务收到新的继续授权时，当前 Dispatcher 或原绑定 Lead 用 `bin/app-session resume --session OWN_ID --task ABS_TASK --reason "用户本次授权"` 恢复原绑定，Lead 再用 `bin/status running` 更新状态。恢复不创建聊天，保留模型与历史；并发上限、未决请求和宿主核验仍有效。
+
 本地协议与离线验收已实现；[宿主能力记录](claudedocs/2026-10-22-app-host-capabilities.md) 单列真实验证和缺口。当前 Codex 独立 Lead 创建闭环仍待真实验收；不能把离线测试通过称为已接通。完成后停止活跃跟踪并保留聊天，没有常驻 watcher。
 
 ## 会话与规则如何组合

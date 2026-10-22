@@ -89,6 +89,52 @@ effort = "host-effort"
         self.assertIn('`codex exec`', result)
         self.assertNotIn('codex exec -m desktop-model', result)
 
+    def test_ccd_executor_without_binding_inherits_lead_instead_of_app_defaults(self):
+        self.configure('''
+[roles.lead]
+[roles.chore]
+[app.defaults.ccd]
+model = "ccd-model"
+effort = "high"
+''')
+        chore = self.resolve('chore', 'app.ccd')
+        self.assertEqual((chore['model'], chore['effort'], chore['sources']), (
+            None, None, {'model': 'lead-inherit', 'effort': 'lead-inherit'}))
+        lead = self.resolve('lead', 'app.ccd')
+        self.assertEqual((lead['model'], lead['sources']['model']), ('ccd-model', 'app.defaults.ccd'))
+        codex = self.resolve('chore', 'app.codex')
+        self.assertEqual(codex['sources']['model'], 'native-default')
+
+    def test_models_writes_ccd_executor_agents_pinning_model_and_effort(self):
+        path = self.root / '.agenthelm/config/roles.toml'
+        path.write_text(path.read_text() + '''
+[roles.hard.app.ccd]
+model = "anthropic/gateway-opus[1m]"
+effort = "low"
+''')
+        result = self.run_cmd('bin/models').stdout
+        self.assertIn('| chore | app.ccd | inherit | lead-inherit | inherit | lead-inherit |', result)
+        agents = self.root / '.claude/agents'
+        hard = (agents / 'agenthelm-hard.md').read_text()
+        self.assertIn('name: agenthelm-hard\n', hard)
+        self.assertIn('model: anthropic/gateway-opus[1m]\neffort: low\n---', hard)
+        self.assertIn('不创建下层代理', hard)
+        chore = (agents / 'agenthelm-chore.md').read_text()
+        self.assertIn('model: inherit\n---', chore)
+        self.assertNotIn('effort:', chore)
+        self.assertEqual(sorted(item.name for item in agents.iterdir()), [
+            f'agenthelm-{role}.md' for role in
+            sorted(('aesthetic', 'chore', 'fact', 'hard', 'simplify', 'visual', 'writing'))])
+
+    def test_unsafe_ccd_agent_values_are_rejected(self):
+        path = self.root / '.agenthelm/config/roles.toml'
+        original = path.read_text()
+        for value in ('bad: value', 'model # note', 'a\\nb'):
+            with self.subTest(value=value):
+                path.write_text(original + f'\n[roles.hard.app.ccd]\nmodel = "{value}"\n')
+                result = self.run_cmd('bin/models', ok=False)
+                self.assertIn('roles.hard.app.ccd.model', result.stderr)
+
     def test_resolve_rejects_unknown_role_entry_and_missing_configuration(self):
         self.run_cmd('bin/models', 'resolve', 'missing', '--entry', 'app.codex', ok=False)
         self.run_cmd('bin/models', 'resolve', 'lead', '--entry', 'cli.codex', ok=False)

@@ -280,3 +280,41 @@ def finish(state, identifier, task):
         binding['active'] = False
         binding.setdefault('history', []).append({'event': 'finished', 'task_status': observed})
     return binding
+
+
+def resume(state, identifier, task, reason):
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError('resume requires a nonempty user authorization reason')
+    if not state['dispatcher']:
+        raise ValueError('resume requires an active Dispatcher')
+    task = task_path(task)
+    binding = state['tasks'].get(str(task), {})
+    lead = state['sessions'].get(binding.get('session'), {})
+    if (binding.get('state') != 'running' or lead.get('role') != 'lead'
+            or lead.get('task') != str(task)):
+        raise ValueError('resume requires an existing bound Lead')
+    if identifier != state['dispatcher']['session'] and identifier != binding['session']:
+        raise ValueError('resume requires the current Dispatcher or this task bound Lead')
+    if state['dispatcher']['entry'] != binding['entry']:
+        raise ValueError('cross-App resume is not supported')
+    if binding['active']:
+        return binding
+    if pending_writes(state, task):
+        raise ValueError('resume blocked by unresolved write request')
+    try:
+        maximum = int(os.environ.get('RESEARCH_MAX_LEADS', '10'))
+    except ValueError as error:
+        raise ValueError('RESEARCH_MAX_LEADS must be a positive integer') from error
+    if maximum < 1:
+        raise ValueError('RESEARCH_MAX_LEADS must be a positive integer')
+    if sum(item.get('active', False) for item in state['tasks'].values()) >= maximum:
+        raise ValueError('Lead concurrency limit reached')
+    binding['active'] = True
+    binding['observation_floor'] = binding.get('observation_counter', 0)
+    for target in (binding, lead):
+        if target.get('observation'):
+            target['observation']['invalidated'] = True
+    binding.setdefault('history', []).append({
+        'event': 'resumed', 'session': identifier, 'owner_epoch': state['owner_epoch'],
+        'reason': reason.strip()})
+    return binding

@@ -155,6 +155,102 @@ class AppLifecycleTests(unittest.TestCase):
         (self.task / 'README.md').write_text('# third task')
         self.assertIn('concurrency limit', self.prepare(ok=False).stderr)
 
+    def test_resume_keeps_lead_and_history_and_allows_native_executor(self):
+        for caller in ('lead-1', 'dispatch-1'):
+            with self.subTest(caller=caller):
+                (self.task / 'STATUS').write_text('done | task | verified')
+                self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+                before = self.app('show', '--session', 'dispatch-1')
+                resumed = self.app('resume', '--session', caller, '--task', str(self.task),
+                                   '--reason', 'User requested an additional Executor check')
+                self.assertTrue(resumed['active'])
+                self.assertEqual(resumed['session'], 'lead-1')
+                self.assertEqual(resumed['actual'], before['tasks'][str(self.task)]['actual'])
+                self.assertEqual(resumed['history'][-2]['event'], 'finished')
+                self.assertEqual(resumed['history'][-1]['session'], caller)
+                self.assertEqual(resumed['history'][-1]['event'], 'resumed')
+                again = self.app('resume', '--session', caller, '--task', str(self.task),
+                                 '--reason', 'same request')
+                self.assertEqual(again, resumed)
+                shown = self.app('show', '--session', 'dispatch-1')
+                self.assertEqual(shown['sessions'], before['sessions'])
+                self.assertEqual(shown['requests'], before['requests'])
+                self.assertEqual((self.task / 'STATUS').read_text(), 'done | task | verified')
+                executor = self.prepare('executor', session='lead-1', payload={
+                    **self.parameters, 'role': 'chore', 'brief': 'check a result'})
+                receipt = self.receipt(executor, session='native-' + caller)
+                receipt.update(native=True, parent_session='lead-1')
+                self.receive(executor, receipt)
+        self.assertFalse(self.log.exists())
+
+    def test_resume_rejects_unknown_executor_and_other_task_lead_without_state_change(self):
+        executor = self.prepare('executor', session='lead-1', payload={
+            **self.parameters, 'brief': 'check result'})
+        receipt = self.receipt(executor, session='native-1')
+        receipt.update(native=True, parent_session='lead-1')
+        self.receive(executor, receipt)
+        original_task = self.task
+        self.task = self.root / 'experiments/002-other'
+        self.task.mkdir()
+        (self.task / 'README.md').write_text('# other')
+        created = self.prepare()
+        self.receive(created, self.receipt(created, session='other-lead'))
+        self.task = original_task
+        (self.task / 'STATUS').write_text('done | task | verified')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        before = self.app('show', '--session', 'dispatch-1')
+        for caller in ('unknown', 'native-1', 'other-lead'):
+            error = self.app('resume', '--session', caller, '--task', str(self.task),
+                             '--reason', 'unauthorized caller', ok=False)
+            self.assertIn('current Dispatcher or this task bound Lead', error.stderr)
+            self.assertEqual(self.app('show', '--session', 'dispatch-1'), before)
+        self.app('resume', '--session', 'lead-1', '--task', str(self.task), '--reason', '', ok=False)
+        self.assertEqual(self.app('show', '--session', 'dispatch-1'), before)
+
+    def test_resume_obeys_limit_and_rejects_pending_creation_without_bound_lead(self):
+        first = self.task
+        (first / 'STATUS').write_text('done | task | verified')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(first))
+        self.env['RESEARCH_MAX_LEADS'] = '1'
+        self.task = self.root / 'experiments/002-pending'
+        self.task.mkdir()
+        (self.task / 'README.md').write_text('# pending')
+        self.prepare()
+        before = self.app('show', '--session', 'dispatch-1')
+        for maximum in ('1', '0', 'invalid'):
+            self.env['RESEARCH_MAX_LEADS'] = maximum
+            self.app('resume', '--session', 'lead-1', '--task', str(first),
+                     '--reason', 'continue', ok=False)
+            self.assertEqual(self.app('show', '--session', 'dispatch-1'), before)
+        self.app('resume', '--session', 'dispatch-1', '--task', str(self.task),
+                 '--reason', 'pending is not a bound Lead', ok=False)
+
+    def test_resume_invalidates_old_observations_and_requires_fresh_context(self):
+        observed, payload = self.observe()
+        late = self.prepare('read', payload={})
+        (self.task / 'STATUS').write_text('done | task | verified')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        self.app('resume', '--session', 'lead-1', '--task', str(self.task), '--reason', 'continue')
+        self.followup(observed, payload, ok=False)
+        error = self.receive(late, dict(payload, request_id=late['id']), ok=False)
+        self.assertIn('stale observation', error.stderr)
+        fresh, fresh_payload = self.observe(revision='after-resume')
+        self.followup(fresh, fresh_payload)
+
+    def test_resume_cannot_run_during_dispatcher_handoff(self):
+        (self.task / 'STATUS').write_text('done | task | verified')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        self.app('release', '--session', 'dispatch-1', '--to', 'dispatch-2')
+        error = self.app('resume', '--session', 'lead-1', '--task', str(self.task),
+                         '--reason', 'continue', ok=False)
+        self.assertIn('active Dispatcher', error.stderr)
+        self.app('claim', '--session', 'dispatch-2', '--entry', 'app.codex')
+        self.app('resume', '--session', 'dispatch-1', '--task', str(self.task),
+                 '--reason', 'old Dispatcher', ok=False)
+        resumed = self.app('resume', '--session', 'dispatch-2', '--task', str(self.task),
+                           '--reason', 'continue')
+        self.assertTrue(resumed['active'])
+
     def test_unresolved_executor_and_followup_block_release_and_finish(self):
         (self.task / 'STATUS').write_text('done | task | verified')
         executor = self.prepare('executor', session='lead-1',
