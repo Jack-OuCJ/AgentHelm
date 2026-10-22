@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Read whitelisted actual-turn evidence from a local Codex rollout; never change it."""
+import argparse
+import hashlib
+import json
+import os
+import re
+import stat
+from pathlib import Path
+
+
+def required_text(record, field):
+    value = record.get(field)
+    if (not isinstance(value, str) or not value.strip() or value != value.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+        raise ValueError(f'missing or invalid evidence field: {field}')
+    return value
+
+
+def json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def invalid_constant(value):
+    raise ValueError('non-JSON constant')
+
+
+def identifier(value, field):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,255}', value):
+        raise ValueError(f'{field} must be a plain session or turn identifier')
+
+
+def read_snapshot(home, path):
+    """Open every component without following links and capture the initial file length."""
+    descriptor = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        parts = path.relative_to(home).parts
+        for component in parts[:-1]:
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    with os.fdopen(child, 'rb') as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError('rollout must be a regular file')
+        snapshot = stream.read(before.st_size)
+        after = os.fstat(stream.fileno())
+        if (len(snapshot) != before.st_size or after.st_size < before.st_size
+                or (after.st_size == before.st_size and after.st_mtime_ns != before.st_mtime_ns)):
+            raise ValueError('rollout changed while reading; retry evidence capture')
+    return snapshot
+
+
+def rollout_snapshot(session):
+    home = Path.home().absolute()
+    logs = home / '.codex/sessions'
+    for directory in (home, home / '.codex', logs):
+        if directory.is_symlink():
+            raise ValueError('symbolic link in rollout directory')
+    paths = []
+    for directory, dirs, files in os.walk(logs, followlinks=False):
+        for name in dirs:
+            if (Path(directory) / name).is_symlink():
+                raise ValueError('symbolic link in rollout directory')
+        for name in files:
+            if name.startswith('rollout-') and name.endswith(f'-{session}.jsonl'):
+                path = Path(directory) / name
+                if path.is_symlink():
+                    raise ValueError('symbolic link in matching rollout')
+                paths.append(path)
+    if len(paths) != 1:
+        raise ValueError('expected exactly one matching rollout')
+    return paths[0], read_snapshot(home, paths[0])
+
+
+def metadata(meta, session, kind, parent_session):
+    for field in ('id', 'cwd', 'originator', 'cli_version'):
+        required_text(meta, field)
+    if 'source' not in meta:
+        raise ValueError('missing evidence field: source')
+    if meta['originator'] != 'Codex Desktop':
+        raise ValueError('session is not from Codex Desktop')
+    if kind == 'lead':
+        if meta['source'] != 'vscode' or parent_session is not None:
+            raise ValueError('Lead requires a Codex Desktop independent session source')
+        source = 'vscode'
+    else:
+        if parent_session is None:
+            raise ValueError('executor requires --parent-session')
+        raw_source = meta['source']
+        subagent = raw_source.get('subagent') if isinstance(raw_source, dict) else None
+        spawn = subagent.get('thread_spawn') if isinstance(subagent, dict) else None
+        if (not isinstance(spawn, dict) or spawn.get('parent_thread_id') != parent_session
+                or parent_session == session or type(spawn.get('depth')) is not int
+                or spawn['depth'] < 1):
+            raise ValueError('executor source must prove the exact native parent session')
+        required_text(spawn, 'parent_thread_id')
+        required_text(spawn, 'agent_path')
+        source = {'subagent': {'thread_spawn': {
+            key: spawn[key] for key in ('parent_thread_id', 'depth', 'agent_path')}}}
+    if meta['id'] != session:
+        raise ValueError('session metadata ID does not match requested session')
+    result = {**{key: meta[key] for key in ('id', 'cwd', 'originator', 'cli_version')}, 'source': source}
+    if kind == 'executor':
+        for field in ('parent_thread_id', 'forked_from_id'):
+            if field in meta:
+                if meta[field] != parent_session:
+                    raise ValueError('executor metadata contradicts parent session')
+                result[field] = meta[field]
+    return result
+
+
+def evidence(session, workspace, turn=None, kind='lead', parent_session=None):
+    identifier(session, 'session')
+    if turn is not None:
+        identifier(turn, 'turn')
+    if parent_session is not None:
+        identifier(parent_session, 'parent-session')
+    if kind == 'executor' and turn is None:
+        raise ValueError('executor requires --turn from native read_thread for this exact session')
+    workspace = workspace.expanduser().resolve()
+    if not workspace.is_dir():
+        raise ValueError('workspace must be an existing directory')
+    path, snapshot = rollout_snapshot(session)
+    if not snapshot.endswith(b'\n'):
+        raise ValueError('incomplete rollout snapshot: trailing newline required')
+    meta = latest = historical_meta = None
+    for number, line in enumerate(snapshot.splitlines(), 1):
+        try:
+            record = json.loads(line, object_pairs_hook=json_object, parse_constant=invalid_constant)
+        except (ValueError, UnicodeError, RecursionError):
+            raise ValueError(f'invalid JSON record at line {number}') from None
+        if not isinstance(record, dict) or not isinstance(record.get('type'), str):
+            raise ValueError(f'invalid record envelope at line {number}')
+        if record['type'] not in ('session_meta', 'turn_context'):
+            continue
+        payload = record.get('payload')
+        if not isinstance(payload, dict):
+            raise ValueError(f'invalid evidence payload at line {number}')
+        if record['type'] == 'session_meta':
+            if payload.get('id') != session:
+                if (kind != 'executor' or meta is None or meta.get('forked_from_id') != parent_session
+                        or payload.get('id') != parent_session or (latest and latest.get('turn_id') == turn)):
+                    raise ValueError('ambiguous session metadata ID or undeclared fork history')
+                raw_source = payload.get('source')
+                if raw_source == 'vscode':
+                    current = metadata(payload, parent_session, 'lead', None)
+                else:
+                    subagent = raw_source.get('subagent') if isinstance(raw_source, dict) else None
+                    spawn = subagent.get('thread_spawn') if isinstance(subagent, dict) else None
+                    ancestor = spawn.get('parent_thread_id') if isinstance(spawn, dict) else None
+                    current = metadata(payload, parent_session, 'executor', ancestor)
+                if historical_meta is not None and any(
+                        current[key] != historical_meta[key] for key in ('id', 'cwd', 'originator', 'source')):
+                    raise ValueError('ambiguous parent history metadata')
+                historical_meta = current
+                continue
+            current = metadata(payload, session, kind, parent_session)
+            if meta is not None and any(current.get(key) != meta.get(key) for key in (
+                    'id', 'cwd', 'originator', 'source', 'forked_from_id', 'parent_thread_id')):
+                raise ValueError('ambiguous session metadata identity')
+            meta = current
+            meta_line = number
+        elif record.get('type') == 'turn_context':
+            latest = payload
+            turn_line = number
+    if meta is None or latest is None:
+        raise ValueError('missing session metadata or turn context')
+    if meta_line >= turn_line:
+        raise ValueError('session metadata must precede latest turn')
+    for field in ('turn_id', 'cwd', 'model', 'effort'):
+        required_text(latest, field)
+    for cwd in (meta['cwd'], latest['cwd'], *([historical_meta['cwd']] if historical_meta else [])):
+        try:
+            if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+                raise ValueError
+            Path(cwd).resolve().relative_to(workspace)
+        except ValueError:
+            raise ValueError('recorded cwd is outside the requested workspace') from None
+    if turn is not None and latest['turn_id'] != turn:
+        raise ValueError('latest turn does not match requested turn')
+    result = {'session': meta['id'], 'workspace': str(workspace), 'cwd': latest['cwd'],
+            'turn_id': latest['turn_id'], 'model': latest['model'], 'effort': latest['effort'],
+            'source': {'path': str(path), 'originator': meta['originator'], 'source': meta['source'],
+                       'cli_version': meta['cli_version']},
+            'locator': {'session_meta_line': meta_line, 'turn_context_line': turn_line,
+                        'snapshot_bytes': len(snapshot), 'sha256': hashlib.sha256(snapshot).hexdigest()}}
+    if kind == 'executor':
+        result['requirements'] = {'turn_source': '--turn must come from native read_thread for this exact session'}
+        if 'forked_from_id' in meta:
+            result['source']['forked_from_id'] = meta['forked_from_id']
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--session', required=True)
+    parser.add_argument('--workspace', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--turn')
+    parser.add_argument('--kind', choices=('lead', 'executor'), default='lead')
+    parser.add_argument('--parent-session')
+    args = parser.parse_args()
+    try:
+        result = evidence(args.session, args.workspace, args.turn, args.kind, args.parent_session)
+    except (ValueError, KeyError, OSError) as error:
+        raise SystemExit('codex-session-evidence: ' + str(error)) from None
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    main()
