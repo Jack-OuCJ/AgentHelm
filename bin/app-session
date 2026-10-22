@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Manage workspace App session ownership through a JSON CLI."""
+import argparse
+import json
+import sys
+
+from _app_sessions import record_capabilities, register, require_dispatcher, transaction
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    for command in ('register', 'show', 'capabilities'):
+        subparser = commands.add_parser(command)
+        subparser.add_argument('--session', required=True)
+        if command == 'register':
+            subparser.add_argument('--entry', choices=('app.codex', 'app.ccd'), required=True)
+    args = parser.parse_args()
+    with transaction(readonly=args.command == 'show') as state:
+        if args.command == 'register':
+            output = register(state, args.session, args.entry)
+        elif args.command == 'capabilities':
+            output = record_capabilities(state, args.session, json.load(sys.stdin))
+        else:
+            require_dispatcher(state, args.session)
+            output = state
+    print(json.dumps(output, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError) as error:
+        print(f'app-session: {error}', file=sys.stderr)
+        sys.exit(1)
