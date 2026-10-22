@@ -133,6 +133,10 @@ class AppHostTests(unittest.TestCase):
         self.assertNotIn('当前角色：lead', output.stdout)
         self.assertIn('会话标识：executor', output.stdout)
         self.assertIn('运行入口：app.codex', output.stdout)
+        reloaded = self.run_cmd('bin/lead-reload', self.task, '--session', 'executor')
+        self.assertIn('当前角色：executor', reloaded.stdout)
+        self.assertIn('会话标识：executor', reloaded.stdout)
+        self.assertIn('运行入口：app.codex', reloaded.stdout)
         self.assertFalse(self.log.exists())
 
     def test_dispatch_app_registration_prints_target_and_session_without_cli(self):
