@@ -1,0 +1,1488 @@
+<!doctype html>
+<!--
+约束简报（refactoring-ui Workflow B，先于标记写下）
+Step 0：纯 HTML 单文件，无框架、无 Tailwind、无组件库、无暗色模式；沿用 agenthelm-intro.html 已验收的 token（同一瑞士风格系列）。
+风格：瑞士国际主义 —— 12 栏网格、齐左、无衬线、黑白 + 单一红色强调、细线、大号数字与章节编号。
+
+内容排序（每幕一个断言式标题 = 主信息）
+  主：每幕标题句（结论）。
+  次：图（拓扑 / 时序 / 泳道 / 矩阵）、卡片与步骤链。
+  三：配置键、路径、阈值；每幕底部等宽小字证据来源。
+  主操作：无（演示文稿）；控件仅翻页、进度、自动/手动开关。
+
+Token（与 agenthelm-intro 一致，配对已在该文件校验）
+  paper #fafafa · line #dbdbdb · line-2 #bdbdbd（仅装饰）
+  ink #171717 (17.18:1) · ink-2 #6a6a6a (5.18:1) · red #df1623（paper 上 4.70:1）· red-text #c70b16 (5.77:1)
+  文字色仅三种：ink / ink-2 / red-text；红底上只用 paper。
+  字号：16（仅证据脚注与图内标注）18 20 22 24 30 36 48 96 128；display 192 仅用于封面。字重 400 / 700。
+  间距：4 8 12 16 24 32 40 48 64 96。
+  网格：1920×1080 舞台，左右边距 120，栏宽 118，栏距 24；≤760 宽或 ≤520 高时改为纵向流式、可滚动。
+  正文行长 ≤ 35em；组间距 > 组内距。
+动效：入场 600–700ms cubic-bezier(.2,0,0,1)，离场 200ms 加速；图中连线以遮罩描边逐条画出；尊重 prefers-reduced-motion。
+翻页：claudedocs/swiss-deck-controls-spec.md（手动默认 / 自动、A 键、?mode=auto、data-end）。
+
+数据口径：基于 2026-10-21 主工作区当前工作树的只读代码调研，多仓不在 main，未访问线上。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Atoms 架构链路 —— 从一句话到一个上线应用</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --paper:#fafafa;--line:#dbdbdb;--line-2:#bdbdbd;
+  --ink:#171717;--ink-2:#6a6a6a;--red:#df1623;--red-text:#c70b16;
+  --ease:cubic-bezier(.2,0,0,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --sans:"Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",Menlo,Consolas,"PingFang SC",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);overflow:hidden}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform:translate(-50%,-50%) scale(var(--s,1));
+  background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:20px;line-height:1.6;overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+h1,h2,h3,p,ul,ol,dl,dd{margin:0;padding:0}
+ul,ol{list-style:none}
+.mono,code{font-family:var(--mono)}
+code{font-size:.92em}
+.muted{color:var(--ink-2)}
+.accent{color:var(--red-text)}
+.b{font-weight:700}
+.nw{white-space:nowrap}
+.mob{display:none}
+
+/* 外框 */
+.top{position:absolute;top:48px;left:120px;right:120px;display:flex;justify-content:space-between;align-items:baseline;
+  padding-bottom:24px;border-bottom:2px solid var(--ink)}
+.top .b{font-size:20px}
+.top .muted{font-size:20px;font-variant-numeric:tabular-nums}
+.progress{position:absolute;left:120px;right:120px;bottom:60px;display:flex;gap:6px}
+.seg{flex:1;padding:12px 0;border:0;background:none;cursor:pointer;min-width:0}
+.seg i{position:relative;display:block;height:4px;background:var(--line)}
+.seg i::after{content:"";position:absolute;inset:0;background:var(--ink);transform:scaleX(var(--p,0));transform-origin:left}
+.seg.cur i::after{background:var(--red)}
+.seg:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.hint{position:absolute;right:120px;bottom:24px;display:flex;align-items:center;gap:24px;font-size:18px;color:var(--ink-2)}
+.mode{display:flex;align-items:center;gap:12px;height:28px;padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer;flex:none}
+.mode i{position:relative;width:40px;height:20px;border:2px solid var(--ink-2);flex:none;transition:background 200ms var(--ease),border-color 200ms var(--ease)}
+.mode i::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;background:var(--ink-2);transition:transform 200ms var(--ease),background 200ms var(--ease)}
+.mode[aria-pressed=true]{color:var(--ink);font-weight:700}
+.mode[aria-pressed=true] i{background:var(--red);border-color:var(--red)}
+.mode[aria-pressed=true] i::after{background:var(--paper);transform:translateX(20px)}
+.mode:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+
+/* 场景 */
+.scene{position:absolute;top:160px;left:120px;width:1680px;height:792px;opacity:0;visibility:hidden;display:flex;flex-direction:column}
+.scene.is-active{opacity:1;visibility:visible}
+.scene.is-leaving{opacity:0;visibility:visible;transition:opacity 200ms var(--ease-in)}
+.scene:not(.is-active):not(.is-leaving) *,.scene.snap *{transition:none!important}
+.hd{flex:none;margin-bottom:40px}
+.hd.tight{margin-bottom:24px}
+.kicker{display:flex;gap:16px;align-items:baseline;font-size:18px;font-weight:700;color:var(--ink-2);margin-bottom:8px}
+.kicker b{color:var(--ink);font-variant-numeric:tabular-nums}
+.h2{font-size:48px;font-weight:700;line-height:1.2;letter-spacing:-.01em}
+.bd{flex:1;min-height:0;position:relative;margin-bottom:44px}
+.src{position:absolute;left:0;right:0;bottom:0;padding-top:8px;border-top:1px solid var(--line);
+  font:16px/1.5 var(--mono);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 揭示原语 */
+.r{opacity:0;transform:translateY(24px);transition:opacity 600ms var(--ease),transform 600ms var(--ease)}
+.r.on{opacity:1;transform:none}
+.m{display:block;overflow:hidden;padding-bottom:.12em;margin-bottom:-.12em}
+.m>span{display:block;transform:translateY(110%);transition:transform 700ms var(--ease)}
+.m.on>span{transform:none}
+.wx{transform:scaleX(0);transform-origin:left;transition:transform 700ms var(--ease)}
+.wx.on{transform:none}
+.wy{transform:scaleY(0);transform-origin:top;transition:transform 700ms var(--ease)}
+.wy.on{transform:none}
+.fd{opacity:0;transition:opacity 450ms var(--ease)}
+.fd.on{opacity:1}
+
+/* 网格与组件 */
+.g12{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:24px;row-gap:24px;align-content:start}
+.c2{grid-column:span 2}.c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}
+.c7{grid-column:span 7}.c8{grid-column:span 8}.c9{grid-column:span 9}.c12{grid-column:span 12}
+.label{font-size:20px;font-weight:700}
+.card{border-top:2px solid var(--ink);padding-top:16px}
+.card.red{border-top:8px solid var(--red);padding-top:12px}
+.card.dash{border-top:2px dashed var(--ink-2)}
+.card .no{font-size:18px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.card .t{font-size:30px;font-weight:700;line-height:1.25;margin-top:4px}
+.card .t.s{font-size:24px}
+.card .m1{font:18px/1.5 var(--mono);color:var(--ink-2);margin-top:8px}
+.card p{margin-top:12px}
+.lst li{position:relative;padding-left:22px;margin-top:10px;line-height:1.5}
+.lst li::before{content:"";position:absolute;left:0;top:.62em;width:8px;height:8px;background:var(--ink)}
+.lst.rd li::before{background:var(--red)}
+.lst.sm li{font-size:18px;margin-top:8px}
+.tg{display:inline-block;font-size:16px;font-weight:700;line-height:24px;padding:0 8px;border:2px solid var(--ink);white-space:nowrap;vertical-align:2px}
+.tg.k{background:var(--ink);color:var(--paper)}
+.tg.rd{background:var(--red);border-color:var(--red);color:var(--paper)}
+.tg.o{border-color:var(--ink-2);color:var(--ink-2)}
+.tg.d{border-style:dashed;border-color:var(--ink-2);color:var(--ink-2)}
+.big{font-size:96px;font-weight:700;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.big small{font-size:36px;letter-spacing:0;margin-left:4px}
+.big.rd{color:var(--red)}
+.card>.big{margin-top:8px}
+.cap{font-size:18px;color:var(--ink-2);margin-top:8px;line-height:1.45}
+.note{border-left:4px solid var(--red);padding-left:20px}
+.note.k{border-left-color:var(--ink)}
+.note.sm{font-size:18px}
+.formula{font:20px/1.5 var(--mono)}
+.small{font-size:18px}
+
+/* 横向步骤链 */
+.flow{display:flex}
+.flow>li{flex:1;min-width:0;position:relative;padding:16px 44px 0 0;border-top:2px solid var(--ink)}
+.flow>li::after{content:"→";position:absolute;right:10px;top:14px;color:var(--ink-2);font-size:22px;line-height:1}
+.flow>li:last-child{padding-right:0}
+.flow>li:last-child::after{content:none}
+.flow .n{font-size:18px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.flow .h{font-size:22px;font-weight:700;line-height:1.3;margin-top:4px}
+.flow .d{font-size:18px;color:var(--ink-2);margin-top:8px;line-height:1.5}
+/* 纵向步骤 */
+.vf>li{display:grid;grid-template-columns:56px minmax(0,1fr);column-gap:8px;padding:12px 0;border-top:1px solid var(--line);line-height:1.5}
+.vf>li:first-child{border-top:2px solid var(--ink)}
+.vf .n{font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.vf .d{grid-column:2;font-size:18px;color:var(--ink-2)}
+
+/* 表格 */
+.tb .tr{display:grid;grid-template-columns:var(--cols);column-gap:24px;align-items:center;min-height:40px;border-top:1px solid var(--line);font-size:18px;line-height:1.4}
+.tb .tr.th{border-top:2px solid var(--ink);color:var(--ink-2);font-weight:700;min-height:36px}
+.tb .tr>*{min-width:0}
+.tb .tr .k1{font:700 18px/1.4 var(--mono)}
+
+/* 封面 */
+.cover .cols{position:absolute;inset:0;pointer-events:none}
+.cover .col{position:absolute;top:0;width:118px;height:792px;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.cover .cv{position:absolute;left:0;top:0;width:1254px}
+.display{font-size:192px;font-weight:700;line-height:.92;letter-spacing:-.04em;margin-top:64px}
+.cover .rule{height:2px;background:var(--ink);margin-top:56px}
+.cover .lead{font-size:36px;font-weight:700;line-height:1.4;margin-top:40px}
+.cover .fine{font-size:20px;color:var(--ink-2);margin-top:24px;max-width:1100px}
+.redblock{position:absolute;left:1278px;top:0;width:402px;height:792px;background:var(--red);color:var(--paper);
+  display:flex;flex-direction:column;justify-content:flex-end;padding:32px}
+.redblock .x{font-size:72px;font-weight:700;line-height:1.05}
+.redblock .small{margin-top:16px;line-height:1.6}
+
+/* 卡片墙（服务全景） */
+.wall{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));column-gap:24px;row-gap:20px}
+.wall>div{border-top:2px solid var(--line-2);padding-top:10px}
+.wall>div.main{border-top-color:var(--ink)}
+.wall>div.ext{border-top-style:dashed}
+.wall .nm{font:700 19px/1.3 var(--mono)}
+.wall .st{font-size:16px;color:var(--ink-2);margin-top:2px}
+.wall .ro{font-size:18px;line-height:1.4;margin-top:6px}
+.wall .tg{font-size:13px;line-height:18px;padding:0 5px;margin-left:8px;vertical-align:2px;font-family:var(--sans)}
+
+/* 图例 */
+.legend{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:center;font-size:18px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:10px;white-space:nowrap}
+.legend svg{flex:none}
+
+/* SVG 图 */
+svg{display:block;overflow:visible}
+.nd{opacity:0;transform:translateY(10px);transition:opacity 500ms var(--ease),transform 500ms var(--ease)}
+.nd.on{opacity:1;transform:none}
+.nd rect{fill:var(--paper);stroke:var(--line-2);stroke-width:2}
+.nd.main rect{stroke:var(--ink)}
+.nd.hub rect{stroke:var(--ink);stroke-width:3}
+.nd.ext rect{stroke:var(--ink-2);stroke-dasharray:6 5}
+.nd .hb{fill:var(--red);stroke:none}
+.nd .nm{font:700 19px var(--sans);fill:var(--ink)}
+.nd .sb{font:14px var(--sans);fill:var(--ink-2)}
+.mkp{fill:none;stroke:#fff;stroke-dasharray:1 2;stroke-dashoffset:1;transition:stroke-dashoffset 700ms var(--ease)}
+.mkp.on{stroke-dashoffset:0}
+.drw{fill:none;stroke-dasharray:1 2;stroke-dashoffset:1;transition:stroke-dashoffset 900ms var(--ease)}
+.drw.on{stroke-dashoffset:0}
+.ln{fill:none}
+.p-http{stroke:var(--ink);stroke-width:2}
+.p-grpc{stroke:var(--ink);stroke-width:5}
+.p-redis{stroke:var(--ink);stroke-width:2.5;stroke-dasharray:10 7}
+.p-kafka{stroke:var(--ink);stroke-width:4;stroke-dasharray:.1 9;stroke-linecap:round}
+.p-sio{stroke:var(--red);stroke-width:3}
+.p-proc{stroke:var(--ink-2);stroke-width:2;stroke-dasharray:3 5}
+.el{font:16px var(--sans);fill:var(--ink-2)}
+.elb{fill:var(--paper)}
+.sq-h rect{fill:var(--paper);stroke:var(--ink);stroke-width:2}
+.sq-h text{font:700 18px var(--sans);fill:var(--ink)}
+.sq-h.hl rect{stroke-width:3}
+.sq-h .hb{fill:var(--red);stroke:none}
+.sq-l{stroke:var(--line-2);stroke-width:2}
+.sq-t{font:18px var(--sans);fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:7px;stroke-linejoin:round}
+.sq-t .sn{font-weight:700;fill:var(--ink-2)}
+.sq-t .pr{font-weight:700}
+
+/* 移动端列表（由同一数据生成） */
+.mlist li{display:grid;grid-template-columns:32px minmax(0,1fr);padding:8px 0;border-top:1px solid var(--line);font-size:14px;line-height:1.45}
+.mlist .n{font-weight:700;color:var(--ink-2)}
+.mlist li.gh{display:block;border-top:2px solid var(--ink);font-weight:700;margin-top:8px}
+.mlist li.gh:first-child{margin-top:0}
+.mlist .d{grid-column:2;color:var(--ink-2)}
+
+/* 泳道传播 */
+.lane .tr{--cols:40px 48px 420px minmax(0,1fr) 150px;min-height:50px;font-size:18px}
+.lane .tr.th{min-height:36px;font-size:18px}
+.lane .th1{align-self:stretch;position:relative}
+.lane .th1::before{content:"";position:absolute;left:18px;top:0;bottom:0;width:4px;background:var(--ink)}
+.lane .th1.off::before,.lane .th1.none::before{background:repeating-linear-gradient(180deg,var(--line-2) 0 6px,transparent 6px 12px);width:3px}
+.lane .th1.ext::before{background:repeating-linear-gradient(180deg,var(--ink-2) 0 2px,transparent 2px 8px)}
+.lane .th1.off::after,.lane .th1.none::after{content:"×";position:absolute;left:8px;top:50%;transform:translateY(-50%);width:24px;height:24px;line-height:22px;text-align:center;
+  font-weight:700;color:var(--red-text);background:var(--paper);border:2px solid var(--red)}
+.lane .th1.none::after{color:var(--ink-2);border-color:var(--ink-2)}
+.lane .legend{font-size:16px;margin-top:12px}
+.lane .legend i{display:inline-block;width:4px;height:18px;background:var(--ink)}
+.lane .legend i.ext{background:repeating-linear-gradient(180deg,var(--ink-2) 0 2px,transparent 2px 6px)}
+.lane .legend i.x{width:18px;height:18px;border:2px solid var(--red);background:none;color:var(--red-text);font:700 13px/14px var(--sans);text-align:center;font-style:normal}
+.lane .legend i.x.g{border-color:var(--ink-2);color:var(--ink-2)}
+.lane .num{font-size:18px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.lane .hop{font:700 18px/1.35 var(--mono)}
+.lane .mech{color:var(--ink);line-height:1.45;padding:6px 0}
+
+/* 鉴权矩阵 */
+.mx .tr{--cols:440px repeat(8,minmax(0,1fr)) 380px;column-gap:0;min-height:35px;font-size:18px}
+.mx .tr>*{padding:0 8px}
+.mx .tr.th{min-height:60px;align-items:end;padding-bottom:6px;font-size:16px;line-height:1.3}
+.mx .tr.th>*{text-align:center}
+.mx .tr.th>:first-child,.mx .tr.th>:last-child{text-align:left}
+.mx .cell{text-align:center;height:35px;display:flex;align-items:center;justify-content:center;border-left:1px solid var(--line)}
+.mx .cell i{display:block;width:18px;height:18px;background:var(--ink);transform:scale(0);transition:transform 400ms var(--ease) 150ms}
+.mx .cell.no i{background:var(--red)}
+.mx .tr.on .cell i{transform:none}
+.mx .ed{font-weight:700}
+.mx .nt{color:var(--ink-2);font-size:16px}
+.mx .tr.bad .ed{color:var(--red-text)}
+
+/* 技术栈表 */
+.stack .tr{--cols:230px 430px 470px minmax(0,1fr)}
+.stack .tr.grp{border-top:2px solid var(--ink)}
+.stack .gl{font-size:16px;font-weight:700;color:var(--ink-2)}
+
+/* 分层缓存 */
+.layer{display:grid;grid-template-columns:200px minmax(0,1fr);column-gap:24px;align-items:center;border-top:1px solid var(--line);padding:14px 0}
+.layer:first-child{border-top:2px solid var(--ink)}
+.layer .lt{font-size:48px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.layer .lt.rd{color:var(--red)}
+.layer .lh{font-size:22px;font-weight:700}
+.layer .ld{font-size:18px;color:var(--ink-2);margin-top:4px}
+.ruled{border-top:2px solid var(--ink);padding-top:14px}
+
+/* Pod 示意 */
+.pod{border:2px solid var(--ink);padding:20px}
+.pod .pt{display:flex;justify-content:space-between;align-items:baseline;font-size:18px;margin-bottom:16px}
+.pod .ct{border:2px solid var(--ink);padding:14px 16px;margin-top:12px}
+.pod .ct.sc{border-style:dashed}
+.pod .ct .nm{font:700 20px var(--mono)}
+.pod .ct .ds{font-size:18px;color:var(--ink-2);margin-top:4px;line-height:1.5}
+.svcs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+.svcs>div{border-top:2px solid var(--ink);padding-top:8px}
+.svcs .nm{font:700 18px var(--mono)}
+
+@media (prefers-reduced-motion:reduce){
+  .r,.m>span,.wx,.wy,.nd{transform:none!important;opacity:0;transition:opacity 200ms linear!important}
+  .r.on,.m.on>span,.wx.on,.wy.on,.nd.on{opacity:1}
+  .mkp,.drw{transition:none!important}
+  .mx .cell i{transition:none!important}
+}
+
+/* 窄屏 / 矮屏：纵向流式，可滚动 */
+@media (max-width:760px),(max-height:520px){
+  #stage{left:0;top:0;width:100%;height:100%;transform:none;font-size:15px;line-height:1.55}
+  .dsk{display:none!important}
+  .mob{display:block}
+  .top{top:0;left:16px;right:16px;padding:12px 0 8px}
+  .top .b,.top .muted{font-size:13px}
+  .scene{top:46px;left:16px;right:8px;bottom:96px;width:auto;height:auto;display:block;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 8px 16px 0;scrollbar-gutter:stable}
+  .hd{margin-bottom:20px}
+  .kicker{font-size:12px;margin-bottom:4px}
+  .h2{font-size:23px;line-height:1.3}
+  .bd{margin-bottom:16px}
+  .src{position:static;white-space:normal;font-size:11px;line-height:1.5;word-break:break-all}
+  .g12{display:flex;flex-direction:column;gap:20px}
+  .card .t{font-size:20px}.card .t.s{font-size:18px}
+  .card .m1{font-size:12px}
+  .card .no{font-size:12px}
+  .card p,.lst li{font-size:14px}
+  .lst.sm li{font-size:13px}
+  .label{font-size:15px}
+  .tg{font-size:12px;line-height:18px;padding:0 6px}
+  .big{font-size:44px}.big small{font-size:18px}
+  .cap{font-size:13px}
+  .note,.note.sm{padding-left:12px;font-size:14px}
+  .formula{font-size:12px;word-break:break-all}
+  .lane .legend{font-size:12px}
+  .small{font-size:13px}
+  .flow{flex-direction:column}
+  .flow>li{padding:10px 0 14px}
+  .flow>li::after{content:"↓";right:0;top:10px;font-size:16px}
+  .flow .n{font-size:12px}.flow .h{font-size:16px}.flow .d{font-size:13px}
+  .vf>li{grid-template-columns:32px minmax(0,1fr);font-size:14px;padding:8px 0}
+  .vf .d{font-size:13px}
+  .tb .tr{display:block;padding:8px 0;font-size:13px;min-height:0}
+  .tb .tr.th{display:none}
+  .tb .tr>*{display:block}
+  .tb [data-l]::before{content:attr(data-l) "："; color:var(--ink-2);font-weight:400;font-family:var(--sans)}
+  .tb .tr .k1{font-size:14px}
+  .cover .cv,.redblock{position:static;width:auto;height:auto}
+  .display{font-size:56px;margin-top:16px}
+  .cover .rule{margin-top:24px}
+  .cover .lead{font-size:20px;margin-top:20px}
+  .cover .fine{font-size:13px}
+  .redblock{margin-top:24px;padding:20px}
+  .redblock .x{font-size:32px}
+  .wall{grid-template-columns:1fr 1fr;column-gap:16px;row-gap:12px}
+  .wall>div{min-height:0}
+  .wall .nm{font-size:13px;word-break:break-all}.wall .st{font-size:11px}.wall .ro{font-size:12px}
+  .legend{font-size:12px;gap:6px 16px}
+  .lane .th1,.lane .num{display:none!important}
+  .lane .hop{font-size:13px}
+  .lane .mech{font-size:13px;padding:2px 0}
+  .lane .tg{margin-top:2px}
+  .mx .cell{display:none!important}
+  .mx .tr>*{padding:0}
+  .mx .ed{font-size:14px}
+  .mx .nt{font-size:12px}
+  .mx .nt .mob{display:block;color:var(--ink)}
+  .layer{grid-template-columns:76px minmax(0,1fr);column-gap:12px;padding:10px 0}
+  .layer .lt{font-size:22px}.layer .lh{font-size:15px}.layer .ld{font-size:13px}
+  .pod{padding:12px}.pod .pt{font-size:13px}.pod .ct .nm{font-size:14px}.pod .ct .ds{font-size:13px}
+  .svcs{grid-template-columns:1fr}.svcs .nm{font-size:13px;word-break:break-all}
+  .progress{left:16px;right:16px;bottom:52px;gap:3px}
+  .seg{padding:8px 0}
+  .hint{left:16px;right:16px;bottom:8px;justify-content:space-between;gap:12px;font-size:12px;line-height:1.35}
+  .hint #hint{min-width:0}
+  .mode{gap:8px}
+}
+</style>
+</head>
+<body>
+<div id="stage" aria-roledescription="动画演示">
+  <header class="top"><span class="b">Atoms 架构链路</span><span class="muted" id="sceneLabel">01 / 23</span></header>
+
+  <!-- 00 封面 -->
+  <section class="scene cover" data-dur="8000" data-end="2600" data-name="封面">
+    <div class="cols dsk">
+      <div class="col wy" data-at="0" style="left:0"></div>
+      <div class="col wy" data-at="40" style="left:142px"></div>
+      <div class="col wy" data-at="80" style="left:284px"></div>
+      <div class="col wy" data-at="120" style="left:426px"></div>
+      <div class="col wy" data-at="160" style="left:568px"></div>
+      <div class="col wy" data-at="200" style="left:710px"></div>
+      <div class="col wy" data-at="240" style="left:852px"></div>
+      <div class="col wy" data-at="280" style="left:994px"></div>
+      <div class="col wy" data-at="320" style="left:1136px"></div>
+    </div>
+    <div class="cv">
+      <div class="label r" data-at="800">架构调研 · 006-atoms-architecture</div>
+      <h1 class="display">
+        <span class="m" data-at="1000"><span>Atoms</span></span>
+        <span class="m" data-at="1150"><span>架构链路</span></span>
+      </h1>
+      <div class="rule wx" data-at="1500"></div>
+      <p class="lead r" data-at="1700">从一句话到一个上线应用</p>
+      <p class="fine r" data-at="1900">基于 2026-10-21 主工作区当前工作树的只读代码调研。多个仓库不在 main 分支，结论以当前工作树为准；未访问任何线上环境；“由配置推断”与“推断”的内容逐项标注。</p>
+    </div>
+    <div class="redblock wy" data-at="500">
+      <div class="x r" data-at="1400">5 章</div>
+      <div class="x r" data-at="1480">23 幕</div>
+      <p class="small r" data-at="1650">全景 · 串联链路 · 关键机制 · 服务间关系 · 技术栈、部署与观测</p>
+    </div>
+  </section>
+
+  <!-- 01 三个平面 -->
+  <section class="scene" data-dur="10000" data-end="2300" data-name="三个平面">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>01</b>全景</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>Atoms 由三个平面加一套账本组成</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c3 card r" data-at="500">
+        <div class="no">01</div><div class="t">产品面</div>
+        <p>用户与运营直接接触的界面和业务 API。</p>
+        <ul class="lst sm"><li class="mono">nuxt-mgx</li><li class="mono">metagptx-backend</li><li class="mono">admin-backend</li><li class="mono">console-backend</li></ul>
+      </div>
+      <div class="c3 card r" data-at="650">
+        <div class="no">02</div><div class="t">智能面</div>
+        <p>执行 Agent，并统一出口调用 LLM。</p>
+        <ul class="lst sm"><li class="mono">mgx-thinking + MetaGPT</li><li class="mono">oneapi</li></ul>
+      </div>
+      <div class="c3 card r" data-at="800">
+        <div class="no">03</div><div class="t">运行面</div>
+        <p>用户沙箱，以及预览与发布流量。</p>
+        <ul class="lst sm"><li class="mono">mgx-runtime · mgx-tool</li><li class="mono">Kong（domain / funcsea）</li><li class="mono">Lambda · 静态 nginx</li></ul>
+      </div>
+      <div class="c3 card red r" data-at="950">
+        <div class="no">04</div><div class="t">账本</div>
+        <p>两本账分别记录不同来源的消耗。</p>
+        <ul class="lst rd sm"><li class="mono">oneapi credit</li><li class="mono">mgx-wallet</li></ul>
+      </div>
+      <p class="c12 note r" data-at="1500" style="margin-top:24px">backend 本身不跑 Agent：<code>src</code> 下没有 <code>import metagpt</code>。它把任务写进 Redis Stream，经 gRPC 交给 mgx-thinking，再接收回调。</p>
+    </div>
+    <p class="src r" data-at="1600">证据 · map-backend-m2.md §1 · map-agent-runtime-m3.md · map-gateway-llm-m4.md · map-billing-ab-m5.md · mech-billing-l4.md</p>
+  </section>
+
+  <!-- 02 服务全景 -->
+  <section class="scene" data-dur="13000" data-end="2400" data-name="服务全景">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>01</b>全景</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>每个仓库只负责一段：主链路穿过其中 8 个</span></span></h2>
+    </header>
+    <div class="bd">
+      <div class="wall" data-seq="450,50">
+        <div class="main r"><div class="nm">nuxt-mgx</div><div class="st">TS · Nuxt 3 SSR</div><div class="ro">Web 前端与 Nitro BFF</div></div>
+        <div class="main r"><div class="nm">metagptx-backend</div><div class="st">Python · FastAPI</div><div class="ro">主业务 API，派发与回流</div></div>
+        <div class="main r"><div class="nm">mgx-thinking</div><div class="st">Python 3.10</div><div class="ro">领任务，每个对话 fork 子进程</div></div>
+        <div class="main r"><div class="nm">MetaGPT</div><div class="st">Python 库（子模块）</div><div class="ro">多智能体框架，进程内 import</div></div>
+        <div class="main r"><div class="nm">mgx-runtime</div><div class="st">Go 1.24 · gin + gRPC</div><div class="ro">沙箱预热池与分配</div></div>
+        <div class="main r"><div class="nm">mgx-tool</div><div class="st">Python · MCP + nginx</div><div class="ro">沙箱内的工具服务</div></div>
+        <div class="main r"><div class="nm">oneapi</div><div class="st">Go 1.24 · gin</div><div class="ro">LLM 网关与 credit 计费</div></div>
+        <div class="main r"><div class="nm">mgx-user</div><div class="st">Go 1.24 · gin + gRPC</div><div class="ro">用户、登录与套餐</div></div>
+        <div class="r"><div class="nm">mgx-wallet</div><div class="st">Go 1.25 · ConnectRPC</div><div class="ro">余额、扣减、充值订单</div></div>
+        <div class="r"><div class="nm">wallet</div><div class="st">Protobuf · buf</div><div class="ro">mgx-wallet 的 IDL 仓库</div></div>
+        <div class="r"><div class="nm">ab-manager</div><div class="st">Go 1.23 · gRPC</div><div class="ro">PostHog 分组的缓存代理</div></div>
+        <div class="r"><div class="nm">admin-backend</div><div class="st">Python 3.11 · FastAPI</div><div class="ro">运营后台，发布 LLM 配置</div></div>
+        <div class="r"><div class="nm">mgx-admin-frontend</div><div class="st">Vue 3 · Arco</div><div class="ro">运营控制台前端</div></div>
+        <div class="r"><div class="nm">console-backend</div><div class="st">NestJS 11 · Prisma 7</div><div class="ro">i18n、SEO、配置集来源</div></div>
+        <div class="r"><div class="nm">console-frontend</div><div class="st">React 19 · Ant Design</div><div class="ro">console 管理界面</div></div>
+        <div class="r"><div class="nm">kong</div><div class="st">Kong 3.9 · Lua 插件</div><div class="ro">静态与 Lambda 数据面</div></div>
+        <div class="r"><div class="nm">domainutil</div><div class="st">Kong 配置</div><div class="ro">域名路由插件的旧快照</div></div>
+        <div class="r"><div class="nm">mgx-appgateway<span class="tg o">遗留</span></div><div class="st">Python · FastAPI</div><div class="ro">自定义域名控制面</div></div>
+        <div class="r"><div class="nm">mgx-inejction</div><div class="st">Vue 3 · Vite</div><div class="ro">注入预览与发布页的脚本</div></div>
+        <div class="r"><div class="nm">finance</div><div class="st">Python 脚本集</div><div class="ro">读 oneapi 日志做成本报表</div></div>
+        <div class="r"><div class="nm">atoms-doc-site</div><div class="st">VitePress</div><div class="ro">技术文档与本地启动脚本</div></div>
+        <div class="ext r"><div class="nm">函数之海<span class="tg d">详见 005</span></div><div class="st">FuncSea · 工作区外</div><div class="ro">全栈应用的 Lambda 发布</div></div>
+      </div>
+      <p class="legend r" data-at="1600" style="margin-top:24px"><span><svg width="40" height="4"><rect width="40" height="2" fill="#171717"/></svg>黑色顶线 = 对话主链路上的仓库（8 个）</span><span><svg width="40" height="4"><rect width="40" height="2" fill="#bdbdbd"/></svg>灰色 = 周边服务</span><span><svg width="40" height="4"><path d="M0 1H40" stroke="#bdbdbd" stroke-width="2" stroke-dasharray="6 4"/></svg>虚线 = 工作区外</span></p>
+    </div>
+    <p class="src r" data-at="1700">证据 · map-frontend-m1.md · map-backend-m2.md · map-agent-runtime-m3.md · map-gateway-llm-m4.md · map-billing-ab-m5.md · map-admin-console-m6.md（各仓第 1–2 节）</p>
+  </section>
+
+  <!-- 03 服务拓扑 -->
+  <section class="scene" data-dur="16000" data-end="5400" data-name="服务拓扑">
+    <header class="hd tight">
+      <div class="kicker r" data-at="0"><b>01</b>全景</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>metagptx-backend 处在拓扑中心，Agent 与 LLM 网关之间另有直连</span></span></h2>
+    </header>
+    <div class="bd">
+      <div class="legend r" data-at="300" style="margin-bottom:14px">
+        <span><svg width="44" height="12"><path d="M0 6H44" class="ln p-http"/></svg>HTTP</span>
+        <span><svg width="44" height="12"><path d="M0 6H44" class="ln p-grpc"/></svg>gRPC / ConnectRPC</span>
+        <span><svg width="44" height="12"><path d="M0 6H44" class="ln p-redis"/></svg>Redis Stream</span>
+        <span><svg width="44" height="12"><path d="M2 6H44" class="ln p-kafka"/></svg>Kafka</span>
+        <span><svg width="44" height="12"><path d="M0 6H44" class="ln p-sio"/></svg>Socket.IO</span>
+        <span><svg width="44" height="18"><rect x="1" y="1" width="42" height="16" fill="none" stroke="#6a6a6a" stroke-width="2" stroke-dasharray="6 5"/></svg>工作区外 / 外部</span>
+        <span>箭头 = 调用或数据流方向</span>
+      </div>
+      <svg id="topo" class="dsk" viewBox="0 0 1680 600" width="1680" height="548" aria-label="服务拓扑图"></svg>
+      <ol id="topoList" class="mlist mob"></ol>
+    </div>
+    <p class="src r" data-at="1000">证据 · 各 map-*.md「跨仓库关系小结」· chain-chat-stream-l1.md · mech-*-l2…l6.md（修正 m2：正文不走 StreamChatCallback）</p>
+  </section>
+
+  <!-- 04 端到端时序 -->
+  <section class="scene" data-dur="17000" data-end="6300" data-name="端到端时序">
+    <header class="hd tight">
+      <div class="kicker r" data-at="0"><b>02</b>串联链路</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>HTTP 发、Socket.IO 收，中间靠 Redis Stream 与 gRPC 接力</span></span></h2>
+    </header>
+    <div class="bd">
+      <svg id="seq" class="dsk" viewBox="0 0 1680 536" width="1680" height="536" aria-label="端到端请求时序图"></svg>
+      <ol id="seqList" class="mlist mob"></ol>
+      <p class="note sm r" data-at="5600" style="margin-top:32px">轮次结束子进程上行 <code>MSG_ACK</code>，backend XACK 后才下发下一条；timeline 另走 <code>StreamBlockTimelineCallback</code>，<code>StreamChatCallback</code> 只承载控制与元数据。</p>
+    </div>
+    <p class="src r" data-at="900">证据 · chain-chat-stream-l1.md「时序」· verify-conflicts-v1.md C2 · metagptx-backend/src/grpc/mgx_callback_server.py:158-236 · chat_task.py:5097</p>
+  </section>
+
+  <!-- 05 队列与进程 -->
+  <section class="scene" data-dur="13000" data-end="3400" data-name="队列与进程">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>02</b>串联链路</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>会话级队列只负责拉起进程，消息级队列逐条喂给它</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6">
+        <div class="card r" data-at="500">
+          <div class="no">会话级 · Redis Stream</div>
+          <div class="t s mono">mgx:chat:task[:lane]</div>
+          <p>payload 为 <code>user_id,chat_id,spawn_reason</code>，只负责“拉起一个 Thinking 子进程”。group 为 <code>mgx</code>，每个主进程的 <code>client_id</code> 作为 consumer 竞争消费。</p>
+        </div>
+        <div class="card r" data-at="750" style="margin-top:32px">
+          <div class="no">消息级 · Redis Stream</div>
+          <div class="t s mono">mgx:chat:event:{chat_id}:message</div>
+          <p>每个 chat 一条 Stream，写入 message_id，由当前或新的子进程消费。</p>
+        </div>
+        <p class="note r" data-at="1000" style="margin-top:32px">已有存活子进程时 <code>add_task</code> 直接返回 False，不再发 chat_task；运行中再发的消息先排在消息级 Stream 里。</p>
+      </div>
+      <div class="c6">
+        <ol class="vf" data-seq="1300,180">
+          <li class="r"><span class="n">01</span><span><b>主进程</b>经 gRPC <code>ListenChatTask</code> 上报 READY</span><span class="d">backend 以 client_id 为 consumer 执行 XREADGROUP，再 yield ChatTask{chat_id, config}</span></li>
+          <li class="r"><span class="n">02</span><span><b>fork 子进程</b>，立即上行 CHAT_DONE</span><span class="d">CHAT_DONE 的语义是“已 fork”，backend 据此 XACK chat_task 消息</span></li>
+          <li class="r"><span class="n">03</span><span><b>子进程</b>另建 <code>StreamChatCallback</code> 控制流</span><span class="d">backend 下发 MESSAGE{id, type, content}</span></li>
+          <li class="r"><span class="n">04</span><span><b>同一 chat 串行</b>：整轮结束才 MSG_ACK</span><span class="d">backend 收到 MSG_ACK 后 XACK，才下发下一条</span></li>
+        </ol>
+        <div class="g12" style="margin-top:32px" data-seq="2200,120">
+          <div class="c4 r"><div class="big"><span data-count="10">10</span><small>s</small></div><div class="cap">主进程 HEARTBEAT 间隔</div></div>
+          <div class="c4 r"><div class="big"><span data-count="60">60</span><small>s</small></div><div class="cap">子进程经 StreamChatCallback 心跳</div></div>
+          <div class="c4 r"><div class="big"><span data-count="100">100</span></div><div class="cap">进程数上限默认值，另按内存比例阶梯背压</div></div>
+        </div>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · chain-chat-stream-l1.md 结论 2–3 · metagptx-backend/src/service/chat/chat_task.py:4976-4997 · mgx-thinking/main.py:41-74,244</p>
+  </section>
+
+  <!-- 06 流式与停止 -->
+  <section class="scene" data-dur="13000" data-end="2900" data-name="流式与停止">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>02</b>串联链路</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>流式靠 content_index 对账；断线不续传，由客户端重拉</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c3 card r" data-at="500">
+        <div class="no">流式</div><div class="t">逐 chunk 推送</div>
+        <p>首包 <code>msg:create</code>，之后每个 chunk 推 <code>msg:update</code>，带 <code>content_index</code>（累计字符数）。</p>
+      </div>
+      <div class="c3 card r" data-at="650">
+        <div class="no">落库</div><div class="t"><span data-count="3" data-at="650">3</span>s 增量</div>
+        <p>空闲 <code>update_interval</code> 3.0s 时增量落库，流结束后全量覆盖写库。</p>
+      </div>
+      <div class="c3 card red r" data-at="800">
+        <div class="no">断线</div><div class="t">无服务端续传</div>
+        <p>重连后重新 <code>join_chat</code>，HTTP 重拉消息列表；<code>content_index</code> 与本地长度不一致时 3 秒后重拉。</p>
+      </div>
+      <div class="c3 card r" data-at="950">
+        <div class="no">停止</div><div class="t">HTTP PATCH，不走 socket</div>
+        <p><code>status=STOPPING</code> → <code>INTERRUPT</code> → 子进程 graceful_interrupt → 上行 <code>STOP</code> → 前端看到 STOPPED。</p>
+      </div>
+      <div class="c8 note k r" data-at="1600" style="margin-top:40px">
+        <div class="label">thinking-gateway：新链路已接入，默认关闭</div>
+        <p style="margin-top:8px">开启后 backend 改发 <code>mgx:chat:task:ingress:{gateway:&lt;name&gt;}</code>，由外部 ThinkingGateway 消费并回调 <code>/internal/thinking-gateway/prepare-chat-task</code>。仓库样例 <code>enabled: false</code>；<code>ListenChatTask</code> 代码已标为 legacy，但仍是当前默认派发通道。实现仓库不在工作区。</p>
+      </div>
+      <div class="c4 r" data-at="1900" style="margin-top:40px">
+        <div class="label">Socket.IO 参数</div>
+        <ul class="lst sm"><li><code>ping_interval: 25</code>、<code>ping_timeout: 20</code></li><li>前端重连 10 次，delay 1–5s</li><li>join ack 3s 超时标为 failed</li></ul>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · chain-chat-stream-l1.md 结论 4、6–8 · metagptx-backend/src/service/message/message.py:4533-4565 · nuxt-mgx/packages/chat-message/src/message/index.vue:639-651</p>
+  </section>
+
+  <!-- 07 沙箱运行时 -->
+  <section class="scene" data-dur="14000" data-end="2700" data-name="沙箱运行时">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>沙箱是预热池里的 Pod：分配时挂盘，闲置 300s 回收</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c5">
+        <div class="pod r" data-at="500">
+          <div class="pt"><span class="b">沙箱 Pod（预热池）</span><span class="mono muted">restartPolicy: Never</span></div>
+          <div class="ct r" data-at="700"><div class="nm">tool · mgx-tool 镜像</div><div class="ds">:8080 MCP SSE 与 /health · :8090 gRPC MGXToolService · :80 nginx</div></div>
+          <div class="ct sc r" data-at="850"><div class="nm">sidecar · 特权容器</div><div class="ds">挂载 JuiceFS 并 bind 到 /data；每 10s CheckStatus，30s 向 manager 心跳</div></div>
+        </div>
+        <div class="svcs" data-seq="1100,150">
+          <div class="r"><div class="nm">mgx-{user_id}</div><div class="cap">ClusterIP，暴露 80 / 8080 / 8090</div></div>
+          <div class="r"><div class="nm">mgx-proxy-{base36}</div><div class="cap">ExternalName，指向 mgx-{user_id}</div></div>
+        </div>
+        <p class="cap r" data-at="1450">两个 Service 的 OwnerReference 都指向 Pod，回收时级联删除。</p>
+      </div>
+      <div class="c7">
+        <ol class="vf" data-seq="600,180">
+          <li class="r"><span class="n">01</span><span>Thinking 子进程 → manager：gRPC <code>AcquireContainer(user_id)</code></span><span class="d">最多 20 次、总时长不超过 600s，退避 2s 到 30s</span></li>
+          <li class="r"><span class="n">02</span><span>manager 查 mgx-user 套餐定资源组，入 Redis 分配队列</span><span class="d">MatcherWorker 按用户加锁，原子占用一个 ready Pod</span></li>
+          <li class="r"><span class="n">03</span><span>manager → sidecar：<code>Allocate</code> 挂载 JuiceFS</span><span class="d">超时 60s，最多 3 次；失败即强制回收该 Pod</span></li>
+          <li class="r"><span class="n">04</span><span>sidecar → tool：<code>StartService</code>，ToolManagerV2 置为 RUNNING</span></li>
+          <li class="r"><span class="n">05</span><span>创建两个 Service，返回 service_host 与 8080 端口</span></li>
+          <li class="r"><span class="n">06</span><span><b>回收</b>：active_chats==0 且闲置 ≥ 300s，sidecar 发 <code>Recycle</code></span><span class="d">连续失败则发 Reallocate；manager 有最小间隔保护</span></li>
+        </ol>
+        <p class="note r" data-at="1900" style="margin-top:24px">Runtime Manager 挂在 AB 实验 <code>urt</code> 上，但 prod 的实验已毕业关闭、默认组 v2，等于全量走沙箱池；只有 test 和 us-test4 按分组。旧路径（backend mgx_queue 经 infermng 创建）仍在代码中。以上为仓库配置，线上动态配置未核。</p>
+      </div>
+    </div>
+    <p class="src r" data-at="1200">证据 · mech-sandbox-runtime-l2.md · verify-conflicts-v1.md C3 · mgx-runtime/internal/service/pool_service.go:679-818 · idle_monitor.go:130-153</p>
+  </section>
+
+  <!-- 08 工具通道与预览暴露 -->
+  <section class="scene" data-dur="14000" data-end="2800" data-name="工具通道与预览暴露">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>Agent 只经两条通道碰沙箱：MCP over SSE 与 gRPC 8090</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6">
+        <div class="card r" data-at="500">
+          <div class="no">通道一 · HTTP</div><div class="t s">MCP over SSE</div>
+          <p>MetaGPT <code>resolve_tool</code> 返回 RemoteProxy，把方法映射成 <code>{Class}_{method}</code>。每次调用新建一个 SSE 会话：<code>GET /sse</code> 后 <code>POST /messages</code>。配置默认未启用 Bearer 认证，隔离依赖集群内网与就绪门（推断）。</p>
+        </div>
+        <div class="card r" data-at="750" style="margin-top:32px">
+          <div class="no">通道二 · gRPC</div><div class="t s">MGXToolService :8090</div>
+          <p>Log、ExecuteCommand、PortForward、Screenshot 等。Log 双向流每 10s 发一次空心跳，流存续期间 tool 计为 running chat，sidecar 据此判定非闲置。</p>
+        </div>
+      </div>
+      <div class="c6">
+        <div class="label r" data-at="1000">预览暴露链路（沙箱预览）</div>
+        <ol class="vf" data-seq="1150,160" style="margin-top:12px">
+          <li class="r"><span class="n">01</span><span>浏览器访问 <code>{uid36}-{chat_id}-preview.&lt;app_viewer.dev.domain&gt;</code></span></li>
+          <li class="r"><span class="n">02</span><span>边缘 nginx 按 Host 取 uuid，带 <code>mgx-proxy-subdomain</code> 头</span><span class="d">该 nginx 配置只在 test 环境找到，prod 边缘路由未取证</span></li>
+          <li class="r"><span class="n">03</span><span><code>mgx-proxy-{uuid}</code>（ExternalName）→ <code>mgx-{uid}:80</code></span></li>
+          <li class="r"><span class="n">04</span><span>tool 容器内 nginx 的 Lua 映射 → 本地 dev server 端口</span><span class="d">映射由 Thinking 的 PortForward(port, subdomain) 登记，tool 调本地 /port-foward 写入</span></li>
+        </ol>
+        <p class="note r" data-at="2100" style="margin-top:24px">两条路径都以 ToolManagerV2 启动，mgx-tool 不回调 backend 的 KeepAlive / Recycle；闲置回收由 sidecar 向 manager 发起，V1 回调链是遗留代码。</p>
+      </div>
+    </div>
+    <p class="src r" data-at="1200">证据 · mech-sandbox-runtime-l2.md 结论 4、6–8 · verify-conflicts-v1.md C8 · mgx-tool/nginx/nginx.conf:305-377 · mgx-tool/mgx_tool/tool_manager_v2.py:47-50</p>
+  </section>
+
+  <!-- 09 预览 -->
+  <section class="scene" data-dur="14000" data-end="3100" data-name="预览">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>预览有三类目标；票据由 backend 签发、Kong 校验</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c4 card r" data-at="500">
+        <div class="no">01 · 沙箱预览</div>
+        <div class="m1">{uid36}-{chat_id}-preview.<br>&lt;app_viewer.dev.domain&gt;</div>
+        <p>runtime nginx → mgx-proxy-{uuid} → 沙箱内 mgx-tool nginx → dev server。</p>
+      </div>
+      <div class="c4 card r" data-at="650">
+        <div class="no">02 · 静态版本预览</div>
+        <div class="m1">{user_id}-{chat_id}-{data_id}-{version}.<br>&lt;app_viewer.prod.domain&gt;</div>
+        <p>同一个 runtime nginx 按 <code>root</code> 直接读 <code>build/{version}</code> 出文件。</p>
+      </div>
+      <div class="c4 card r" data-at="800">
+        <div class="no">03 · FuncSea DEV 预览</div>
+        <div class="m1">{user_id}-{chat_id}-{version}-dev.<br>&lt;deploy_dev_domain&gt;</div>
+        <p>kong-funcsea → <code>funcseainfra-router</code> → dev Lambda。</p>
+      </div>
+      <div class="c9" style="margin-top:28px">
+        <ol class="flow" data-seq="1200,160">
+          <li class="r"><div class="n">01</div><div class="h">签发票据</div><div class="d">POST /chats/{chat_id}/preview-ticket；按 owner 签 HMAC，type=preview</div></li>
+          <li class="r"><div class="n">02</div><div class="h">换 cookie</div><div class="d">隐藏 iframe 访问 /__preview_auth?ticket=，写入 _preview_ticket</div></li>
+          <li class="r"><div class="n">03</div><div class="h">Kong 校验</div><div class="d">preview-auth 全局插件（PRIORITY 900）：签名、type、exp，且 host 中 app_id = chat_id</div></li>
+          <li class="r"><div class="n">04</div><div class="h">缺票据 302</div><div class="d">跳到 {web_domain}/preview-auth，换票后回跳</div></li>
+        </ol>
+      </div>
+      <div class="c3 r" data-at="2000" style="margin-top:28px">
+        <div class="big rd"><span data-count="3600" data-at="2000">3600</span><small>s</small></div>
+        <div class="cap">票据 TTL。前端每 5 分钟检查，50 分钟起续票。沙箱预览 host 上由谁校验票据，仓库内未找到。</div>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-preview-deploy-domain-l3.md 结论 1–3 · verify-conflicts-v1.md C6 · kong/kong-funcsea/plugins/preview-auth/handler.lua:128-132</p>
+  </section>
+
+  <!-- 10 发布与域名 -->
+  <section class="scene" data-dur="15000" data-end="2600" data-name="发布与域名">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>两种发布、两套数据面：静态走 kong-domain，全栈走 Lambda</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6">
+        <div class="label r" data-at="450">纯前端 static · kong-domain</div>
+        <ol class="vf" data-seq="600,150" style="margin-top:12px">
+          <li class="r"><span class="n">01</span><span>backend 把产物复制到 <code>{seg1}/{seg2}/{seg3}/{deploy_id}</code> 分片目录</span></li>
+          <li class="r"><span class="n">02</span><span>backend 直连 Kong Admin API 写 Route</span><span class="d">tags 带 deploy-id-*、static-b64-*、is-primary / is-secondary</span></li>
+          <li class="r"><span class="n">03</span><span><code>unified-domain-router</code> v2.3 改写为 <code>/a/b/c/{deploy_id}/…</code></span><span class="d">线上源推断为 kong/kong-domain；domainutil 是旧快照</span></li>
+          <li class="r"><span class="n">04</span><span>静态 nginx：try_files 兜底 SPA，sub_filter 注入 appPlugins</span></li>
+        </ol>
+      </div>
+      <div class="c6">
+        <div class="label r" data-at="450">全栈 FuncSea · kong-funcsea</div>
+        <ol class="vf" data-seq="750,150" style="margin-top:12px">
+          <li class="r"><span class="n">01</span><span><code>PUT /v1/chats/{id}/deployment</code> 分流到 <code>_deploy_funcsea</code></span></li>
+          <li class="r"><span class="n">02</span><span>deploysvc / func-sea-infra 部署 prod Lambda</span><span class="d">内部细节详见 005</span></li>
+          <li class="r"><span class="n">03</span><span>Redis 投影 <code>func-sea-infra:route:{env}:{host}</code></span><span class="d">MySQL host_routes 为事实源</span></li>
+          <li class="r"><span class="n">04</span><span><code>funcseainfra-router</code> set_target → Lambda Function URL</span><span class="d">disabled 返回 404，redirect_to 返回 307；Redis 超时 150ms</span></li>
+        </ol>
+      </div>
+      <div class="c6 note r" data-at="1700" style="margin-top:12px">
+        <div class="label">自定义域名</div>
+        <p class="small" style="margin-top:6px">从 backend 配置看，test、pre、prod 的写操作与状态事件已切到 atomsdomain（Kafka <code>{env}-atomsdomain-status-events</code>）；主域名设置仍直连 funcsea；旧 appgateway 代码未下线。</p>
+      </div>
+      <div class="c6 note k r" data-at="1850" style="margin-top:12px">
+        <div class="label">注入脚本在网关层</div>
+        <p class="small" style="margin-top:6px">模板里不带。runtime nginx 与静态 nginx 用 sub_filter，Lambda 页面用 Kong <code>custom-replace-body</code>，test 集群改用 <code>lane-script-injector</code>。</p>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-preview-deploy-domain-l3.md 结论 4–7 · verify-conflicts-v1.md C6 · metagptx-backend/src/service/domain/domain.py:166-170,4915-4916</p>
+  </section>
+
+  <!-- 11 计费 -->
+  <section class="scene" data-dur="15000" data-end="2600" data-name="计费">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>两本账：Agent 对话扣 oneapi credit，只有 AI Hub 扣 mgx-wallet</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6 card r" data-at="500">
+        <div class="no">Agent 对话</div><div class="t s">oneapi credit</div>
+        <ul class="lst sm">
+          <li>backend 下发 chat owner 的 oneapi default token，oneapi 走 Chat 分支</li>
+          <li><code>ConsumeCreditQuota</code>：free（受每日限额）→ package → bonus</li>
+          <li>订阅额度、兑换码、admin 补偿都写到这里</li>
+        </ul>
+      </div>
+      <div class="c6 card red r" data-at="700">
+        <div class="no">AI Hub（发布应用调用 AI）</div><div class="t s">mgx-wallet</div>
+        <ul class="lst rd sm">
+          <li>token 名 <code>app_{chat_id}</code>，需 <code>MGX_WALLET_SERVICE_ENABLED</code>（代码默认 false，各环境取值未找到）</li>
+          <li>GetBalance 预检 → <code>Decrease</code>：先扣 bonus_ai 再扣 balance，allow_overdraft=true</li>
+          <li><code>SELECT … FOR UPDATE</code> 锁账户行 + (biz_name, biz_no) 幂等，DUPLICATE_REQUEST 视为成功</li>
+        </ul>
+      </div>
+      <div class="c12" style="margin-top:20px">
+        <div class="label r" data-at="1100">oneapi 结算：没有预扣</div>
+        <ol class="flow" data-seq="1250,170" style="margin-top:12px">
+          <li class="r"><div class="n">01</div><div class="h">锁内查余额</div><div class="d">可用额度 ≤ 0 返回 403</div></li>
+          <li class="r"><div class="n">02</div><div class="h">写 Pending 交易</div><div class="d">credit_transaction 记录 preQuota，此时不扣余额</div></li>
+          <li class="r"><div class="n">03</div><div class="h">按实际 usage 结算</div><div class="d">Chat 与 AI Hub 只在查余额和结算两处分流</div></li>
+        </ol>
+      </div>
+      <p class="c12 formula r" data-at="1900" style="margin-top:8px">Quota = ceil(Σ token × 倍率 × ModelRatio × GroupRatio) · 1 quota = $0.002 / 1000 · QUOTA_PER_CREDIT = 100000（约 $0.2 / credit，推断）</p>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-billing-l4.md 结论 1–6 · verify-conflicts-v1.md C4 · oneapi/relay/controller/text_legacy.go:101-178 · oneapi/relay/controller/aihub_helper.go:43-45</p>
+  </section>
+
+  <!-- 12 充值与支付 -->
+  <section class="scene" data-dur="14000" data-end="2900" data-name="充值与支付">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>充值进 wallet，订阅与补偿进 oneapi，两边余额不同步</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c12">
+        <div class="label r" data-at="450">钱包充值</div>
+        <ol class="flow" data-seq="600,150" style="margin-top:12px">
+          <li class="r"><div class="n">01</div><div class="h">前端下单</div><div class="d">POST /api/v1/transaction/instant-payment/create</div></li>
+          <li class="r"><div class="n">02</div><div class="h">Stripe Checkout</div><div class="d">backend 自建，scene=wallet；按 (biz_name, biz_order_id) 幂等</div></li>
+          <li class="r"><div class="n">03</div><div class="h">webhook 回 backend</div><div class="d">验签；mgx-payment 来源的事件直接忽略</div></li>
+          <li class="r"><div class="n">04</div><div class="h">通知 wallet</div><div class="d">/topup/payment/event/notify，Bearer</div></li>
+          <li class="r"><div class="n">05</div><div class="h">balance 入账</div><div class="d">ProcessPaymentSuccess → Increase(balance)</div></li>
+        </ol>
+      </div>
+      <div class="c4 card r" data-at="1400" style="margin-top:16px">
+        <div class="t s">wallet 侧</div>
+        <ul class="lst sm"><li>退款转发到 /webhook/payment</li><li>自动充值由 wallet 调 mgx-payment CreateCharge</li><li>平台赠送只进 bonus_*</li><li>四个定时任务都用 redsync 分布式锁</li></ul>
+      </div>
+      <div class="c4 card r" data-at="1550" style="margin-top:16px">
+        <div class="t s">写 oneapi 额度</div>
+        <ul class="lst sm"><li>订阅 apply_pricing_plan → PUT /api/user/，带幂等键</li><li>admin set_quota（credit_type=BONUS）不传 biz_trans_no，推断无幂等</li></ul>
+      </div>
+      <div class="c4 card r" data-at="1700" style="margin-top:16px">
+        <div class="t s">finance 报表</div>
+        <ul class="lst sm"><li>脚本集，读 oneapi.logs 并跨库 join backend 库</li><li>成本口径 sum(quota) × 0.002 / 1000</li><li>有一个脚本直接改写 logs.quota</li></ul>
+      </div>
+      <p class="c12 note r" data-at="2100" style="margin-top:8px">backend 代理的 <code>/account/chat-quota</code>：两仓 main 已实现，当前检出的分支还没合入，不能据此说缺失。</p>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-billing-l4.md 结论 6–7、时序 C · verify-conflicts-v1.md C5 · metagptx-backend/src/service/transaction/transaction.py:631-672,1341-1357</p>
+  </section>
+
+  <!-- 13 A/B -->
+  <section class="scene" data-dur="15000" data-end="2700" data-name="A/B 实验">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>PostHog 是分组的唯一事实源，各层只做缓存</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6" data-seq="500,180">
+        <div class="layer r"><div class="lt rd">L0</div><div><div class="lh">PostHog · 事实源</div><div class="ld">前端 posthog-js / posthog-node 直接评估；flag 定义存 Redis，30 秒轮询一次</div></div></div>
+        <div class="layer r"><div class="lt">L1</div><div><div class="lh">ab-manager · Redis · 300s</div><div class="ld"><code>ab1:{expAlias}:{user_id}</code> / <code>ab2:{expAlias}:{oneapi_user_id}</code></div></div></div>
+        <div class="layer r"><div class="lt">L2</div><div><div class="lh">backend 进程内 LRU · 60s</div><div class="ld">仅 use_cache=True 的调用；oneapi 侧为 go-cache 1 分钟</div></div></div>
+        <div class="layer r"><div class="lt">L3</div><div><div class="lh">业务行为</div><div class="ld">Thinking 配置（compress_type、subagent 等）、Claude prompt cache 策略</div></div></div>
+      </div>
+      <div class="c6 ruled r" data-at="1200">
+        <div class="label">要点</div>
+        <ul class="lst" data-seq="1300,160">
+          <li class="r"><b>c-c-1</b> 决定每个 Anthropic 请求的 prompt cache 断点：test 用 1h TTL，ssrc 用 stable system runtime context，其他用默认 assistant tail5 top4。</li>
+          <li class="r"><b>ssmb</b>：ab-manager 当前分支已有，oneapi 当前工作树没有（main 已有），这部分用户会落到默认策略。</li>
+          <li class="r"><b>ug / fg / pfg</b> 已全量反代到 Go 服务，不再按用户灰度。</li>
+          <li class="r"><b>OnlyEvaluateLocally 实际不生效</b>：未配 PersonalApiKey，每次缓存未命中都是一次远端 /flags 调用。</li>
+          <li class="r"><b>失效窗口</b>：Reset 只删 Redis，不通知进程缓存；PostHog 调整后最长约 300s + 60s 才在后端生效（推断）。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-ab-config-l6.md 结论 1–5 · ab-manager/internal/cache/redis.go:57-61 · oneapi/relay/adaptor/anthropic/prompt_caching.go:58-106</p>
+  </section>
+
+  <!-- 14 配置下发 -->
+  <section class="scene" data-dur="14000" data-end="2500" data-name="配置下发">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>03</b>关键机制</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>LLM 配置是带 etag 的快照：backend 启动强依赖，每 60s 比对</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c12">
+        <ol class="flow" data-seq="500,160">
+          <li class="r"><div class="n">01</div><div class="h">admin 发布</div><div class="d">校验默认模型与 embedding 后生成快照，写 MySQL，etag = sha256</div></li>
+          <li class="r"><div class="n">02</div><div class="h">backend 启动拉全量</div><div class="d">gRPC GetPublishedLlmConfig；失败读 fallback 文件，再失败拒绝启动</div></li>
+          <li class="r"><div class="n">03</div><div class="h">每 60s 比对 etag</div><div class="d">变化才拉全量；校验失败保留旧配置</div></li>
+          <li class="r"><div class="n">04</div><div class="h">随任务下发</div><div class="d">ListenChatTask 流里带 models / llm / embedding / _mgx</div></li>
+          <li class="r"><div class="n">05</div><div class="h">Thinking 构造 LLM</div><div class="d">global_config["models"][name]，base_url 指向 oneapi</div></li>
+        </ol>
+      </div>
+      <div class="c4 r" data-at="1400" style="margin-top:32px">
+        <div class="big rd"><span data-count="60" data-at="1400">60</span><small>s</small></div>
+        <div class="cap">backend 监控循环比对 Meta etag 的间隔（sync_interval）</div>
+      </div>
+      <div class="c4 card r" data-at="1600" style="margin-top:32px">
+        <div class="t s">死写的 Redis key</div>
+        <p class="small">admin 发布时写 <code>mgx:llm:model:config</code> 与 <code>mgx:llm:model:version</code>，全工作区找不到读取方；backend 已改走 gRPC。</p>
+      </div>
+      <div class="c4 card r" data-at="1800" style="margin-top:32px">
+        <div class="t s">console 全是拉模式</div>
+        <p class="small">config-set 每 30 分钟、SEO 每 10 分钟、i18n 每 30 分钟拉取，写各 Pod 本地 fs 缓存；Pod 间最长约 30 分钟不一致（推断）。config-set 下发接口公开、无认证。</p>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · mech-ab-config-l6.md 结论 6–8、时序 B · metagptx-backend/src/service/config/llm_model_config_published.py:97-127,295-333</p>
+  </section>
+
+  <!-- 15 泳道传播 -->
+  <section class="scene" data-dur="16000" data-end="3200" data-name="泳道传播">
+    <header class="hd tight">
+      <div class="kicker r" data-at="0"><b>04</b>服务间关系</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>泳道沿 HTTP 主干连续，在 websocket 与 Thinking 出站处断开</span></span></h2>
+    </header>
+    <div class="bd">
+      <div class="tb lane">
+        <div class="tr th r" data-at="400"><span></span><span>#</span><span>跳</span><span>机制</span><span>状态</span></div>
+        <div data-seq="550,170">
+          <div class="tr r"><span class="th1 ext"></span><span class="num">01</span><span class="hop">浏览器 → 入口</span><span class="mech">前端代码不注入泳道头；推断来自浏览器插件或泳道 Host 网关</span><span><span class="tg o">外部注入</span></span></div>
+          <div class="tr r"><span class="th1"></span><span class="num">02</span><span class="hop">nuxt SSR → backend</span><span class="mech">只对同源透传；选路 Map &gt; Id &gt; Host 规则 &gt; 基线；带头时 Force=true，默认不回退</span><span><span class="tg k">带泳道</span></span></div>
+          <div class="tr r"><span class="th1"></span><span class="num">03</span><span class="hop">backend 入站 HTTP</span><span class="mech">lane-routing SDK 全局 patch Starlette；出站 httpx / aiohttp 自动带头</span><span><span class="tg k">带泳道</span></span></div>
+          <div class="tr r"><span class="th1 off"></span><span class="num">04</span><span class="hop">浏览器 → Socket.IO</span><span class="mech">SDK 只处理 scope.type == "http"，websocket 拿不到泳道上下文</span><span><span class="tg rd">断开</span></span></div>
+          <div class="tr r"><span class="th1"></span><span class="num">05</span><span class="hop">backend → Redis Stream</span><span class="mech">chat_task 改写为 <code>&lt;base&gt;:&lt;lane&gt;</code>；Map 非空时只认 atomsthinking 的映射</span><span><span class="tg k">改写 channel</span></span></div>
+          <div class="tr r"><span class="th1 ext"></span><span class="num">06</span><span class="hop">Thinking → ListenChatTask</span><span class="mech">泳道是部署级常量（MGX_CALLBACK_CLIENT_ID），只在这一路手工注入 x-lane-id</span><span><span class="tg o">部署级</span></span></div>
+          <div class="tr r"><span class="th1 off"></span><span class="num">07</span><span class="hop">Thinking 出站 gRPC</span><span class="mech">StreamChatCallback、runtime、tool 都不带泳道 metadata</span><span><span class="tg rd">断开</span></span></div>
+          <div class="tr r"><span class="th1"></span><span class="num">08</span><span class="hop">backend → FuncSea / mirror</span><span class="mech">显式写入 X-Lane-Map</span><span><span class="tg k">带泳道</span></span></div>
+          <div class="tr r"><span class="th1 none"></span><span class="num">09</span><span class="hop">→ oneapi / wallet / admin / ab</span><span class="mech">下游没有泳道代码，与基线共享计费、配额、LLM 配置和 AB 状态（推断）</span><span><span class="tg o">不感知</span></span></div>
+        </div>
+        <p class="legend r" data-at="2300"><span><i></i>实线 = 带泳道</span><span><i class="ext"></i>点线 = 外部注入 / 部署级</span><span><i class="x">×</i>红 × = 断开</span><span><i class="x g">×</i>灰 × = 下游不感知</span></p>
+      </div>
+      <p class="note sm r" data-at="2600" style="margin-top:16px">SDK 版本：backend 锁定 0.9.13，主仓 .venv 是过期的 0.9.10，它 patch 入站 HTTP、gRPC 服务端和出站 httpx / aiohttp，不 patch 出站 gRPC；Thinking 用 0.9.5，gRPC 也只 patch 服务端。</p>
+    </div>
+    <p class="src r" data-at="1200">证据 · mech-lane-auth-l5.md 结论 1–6 · verify-conflicts-v1.md C7 · metagptx-backend/src/common/util/lane_routing.py:151-160 · mgx-thinking/mgx_thinking/lane_routing.py:32-56</p>
+  </section>
+
+  <!-- 16 鉴权矩阵 -->
+  <section class="scene" data-dur="16000" data-end="3400" data-name="鉴权矩阵">
+    <header class="hd tight">
+      <div class="kicker r" data-at="0"><b>04</b>服务间关系</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>用户侧入口都有凭据，多条内部服务间调用完全无鉴权</span></span></h2>
+    </header>
+    <div class="bd">
+      <div id="authm" class="tb mx"></div>
+    </div>
+    <p class="src r" data-at="1200">证据 · mech-lane-auth-l5.md「鉴权矩阵」· map-admin-console-m6.md · map-billing-ab-m5.md · 只列凭据类型与配置键名，不含任何值</p>
+  </section>
+
+  <!-- 17 共享契约 -->
+  <section class="scene" data-dur="14000" data-end="1700" data-name="共享契约">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>04</b>服务间关系</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>服务之间还靠共享库表、Redis 命名空间、proto 与 topic 耦合</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c6 card r" data-at="500">
+        <div class="no">01</div><div class="t s">共享 MySQL</div>
+        <ul class="lst sm">
+          <li>admin-backend 与 backend 同库，announcement、theme、redemption_code 两边各有模型（推断双写）</li>
+          <li>ab-manager 只读 <code>oneapi_account</code>；finance 跨库读 <code>oneapi_account</code>、<code>user</code></li>
+          <li>mgx-runtime 与 backend 同名 <code>mgx_runtime</code> 表；mgx-user 表名与 backend 一致（均推断共库）</li>
+        </ul>
+      </div>
+      <div class="c6 card r" data-at="650">
+        <div class="no">02</div><div class="t s">Redis 命名空间</div>
+        <ul class="lst sm">
+          <li><code>mgx:chat:task[:lane]</code>、<code>mgx:chat:event:{chat_id}:*</code>；Socket.IO pub/sub channel <code>socketio</code></li>
+          <li>nuxt-mgx 与 console 共享 <code>cms-cache</code>、<code>swr-cache</code>、<code>posthog-flags</code></li>
+          <li>Kong 读 <code>func-sea-infra:route:{env}:{host}</code>；ab-manager 用 <code>ab1/ab2/ab3</code></li>
+        </ul>
+      </div>
+      <div class="c6 card r" data-at="800">
+        <div class="no">03</div><div class="t s">proto 子模块</div>
+        <ul class="lst sm">
+          <li><code>mgx_proto</code>：backend 与 thinking 锁在不同提交，backend 多出 RunCoordinate，增量且向后兼容</li>
+          <li>wallet IDL：mgx-wallet 当前分支依赖 v1.3.4，main 为 v1.3.5</li>
+        </ul>
+      </div>
+      <div class="c6 card r" data-at="950">
+        <div class="no">04</div><div class="t s">Kafka topic</div>
+        <ul class="lst sm">
+          <li><code>{env}-atomsdomain-status-events</code>：域名状态</li>
+          <li><code>mgx-traffic-pv</code>：Kong 流量日志 → backend → PostHog</li>
+          <li>TaskIQ <code>&lt;env&gt;-mgx-api-taskiq-tasks</code>，泳道加 <code>-lane-&lt;id&gt;</code></li>
+        </ul>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · map-admin-console-m6.md §5 · map-billing-ab-m5.md · chain-chat-stream-l1.md「冲突」· mech-sandbox-runtime-l2.md · mech-lane-auth-l5.md</p>
+  </section>
+
+  <!-- 18 技术栈 -->
+  <section class="scene" data-dur="15000" data-end="2500" data-name="技术栈">
+    <header class="hd tight">
+      <div class="kicker r" data-at="0"><b>05</b>技术栈、部署与观测</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>Python 管业务与 Agent，Go 管运行时、网关和账本</span></span></h2>
+    </header>
+    <div class="bd">
+      <div class="tb stack">
+        <div class="tr th r" data-at="400"><span>仓库</span><span>语言 / 框架（按语言分组）</span><span>存储</span><span>通信与中间件</span></div>
+        <div data-seq="500,110">
+          <div class="tr grp r"><span class="k1">metagptx-backend</span><span data-l="语言"><b>Python</b> · FastAPI 0.109 · Tortoise</span><span data-l="存储">MySQL · Redis · JuiceFS · S3</span><span data-l="通信">Redis Stream · Kafka(TaskIQ) · gRPC · Socket.IO</span></div>
+          <div class="tr r"><span class="k1">mgx-thinking</span><span data-l="语言"><b>Python 3.10</b> · 自研 Manager + MetaGPT</span><span data-l="存储">无自有库；JuiceFS PVC</span><span data-l="通信">gRPC 客户端 · Langfuse</span></div>
+          <div class="tr r"><span class="k1">mgx-tool</span><span data-l="语言"><b>Python 3.10</b> · MCP + gRPC + nginx(Lua)</span><span data-l="存储">沙箱 /data（JuiceFS）</span><span data-l="通信">MCP over SSE · gRPC 8090</span></div>
+          <div class="tr r"><span class="k1">admin-backend</span><span data-l="语言"><b>Python 3.11</b> · FastAPI · Tortoise</span><span data-l="存储">MySQL（与 backend 同库）· Redis · HBase</span><span data-l="通信">gRPC 服务端 · Socket.IO</span></div>
+          <div class="tr r"><span class="k1">mgx-appgateway</span><span data-l="语言"><b>Python 3.11</b> · FastAPI · TaskIQ</span><span data-l="存储">PostgreSQL · Redis</span><span data-l="通信">Kong Admin API</span></div>
+          <div class="tr grp r"><span class="k1">mgx-runtime</span><span data-l="语言"><b>Go 1.24</b> · gin + gRPC · client-go</span><span data-l="存储">MySQL · Redis</span><span data-l="通信">K8s API · JuiceFS sidecar</span></div>
+          <div class="tr r"><span class="k1">oneapi</span><span data-l="语言"><b>Go 1.24</b> · gin + gRPC</span><span data-l="存储">MySQL / PG / SQLite（GORM）· Redis</span><span data-l="通信">无 MQ；DB 补偿表 + Redis 选主</span></div>
+          <div class="tr r"><span class="k1">mgx-wallet</span><span data-l="语言"><b>Go 1.25</b> · ConnectRPC + vanguard</span><span data-l="存储">MySQL（流水 64 分表）· Redis 锁</span><span data-l="通信">MySQL outbox，无 MQ</span></div>
+          <div class="tr r"><span class="k1">mgx-user</span><span data-l="语言"><b>Go 1.24</b> · gin + gRPC</span><span data-l="存储">MySQL · 多个 Redis 实例</span><span data-l="通信">gRPC · OTel</span></div>
+          <div class="tr r"><span class="k1">ab-manager</span><span data-l="语言"><b>Go 1.23</b> · gRPC</span><span data-l="存储">Redis · MySQL 只读</span><span data-l="通信">PostHog SDK / REST</span></div>
+          <div class="tr grp r"><span class="k1">nuxt-mgx</span><span data-l="语言"><b>TypeScript</b> · Nuxt 3 + Nitro</span><span data-l="存储">不连库；Redis（unstorage）</span><span data-l="通信">HTTP · Socket.IO 客户端</span></div>
+          <div class="tr r"><span class="k1">console-backend</span><span data-l="语言"><b>NestJS 11</b> · Prisma 7</span><span data-l="存储">PostgreSQL · Redis</span><span data-l="通信">Bull 队列</span></div>
+          <div class="tr r"><span class="k1">kong</span><span data-l="语言"><b>Kong 3.9</b> + 自研 Lua 插件</span><span data-l="存储">Kong DB（Postgres）· Redis 投影</span><span data-l="通信">traffic-log 侧车 → Kafka</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="src r" data-at="1200">证据 · map-*.md 第 2、5 节 · deploy-observability-l7.md「汇总表」· backend 运行时 3.12 为推断（仓库无显式声明）</p>
+  </section>
+
+  <!-- 19 部署形态 -->
+  <section class="scene" data-dur="15000" data-end="2900" data-name="部署形态">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>05</b>技术栈、部署与观测</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>全部跑在 K8s 上，两代 CI 并存，Kong 数据面例外</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c4 card r" data-at="500">
+        <div class="no">新一代 CI</div><div class="t s">v2 app-pipeline + AppEnv / AppRollout</div>
+        <ul class="lst sm"><li class="mono">atomsweb · atomsruntimemgr</li><li class="mono">atomstool · atomsuser</li><li>backend 的 AppRollout 分支 <code>atomsgrpc</code></li></ul>
+      </div>
+      <div class="c4 card r" data-at="650">
+        <div class="no">旧一代 CI</div><div class="t s">共享模板 + ArgoCD</div>
+        <ul class="lst sm"><li>mgx-thinking、mgx-appgateway、mgx-wallet、oneapi</li><li>ab-manager、admin-backend、admin 前端、console-backend</li><li>backend 的 legacy 分支</li></ul>
+      </div>
+      <div class="c4 card red r" data-at="800">
+        <div class="no">例外</div><div class="t s">Kong 用 docker-compose</div>
+        <ul class="lst rd sm"><li>kong、migrations、postgres、konga、traffic-log forwarder</li><li>FuncSea 应用运行在 AWS Lambda</li></ul>
+      </div>
+      <div class="c8">
+        <div class="label r" data-at="1100">backend：一个镜像，多种工作负载</div>
+        <ul class="lst sm" data-seq="1250,110" style="margin-top:4px">
+          <li class="r">主线 API <code>{env}-metagptx-api</code></li>
+          <li class="r">按版本成对发布 <code>{env}-metagptx-grpc-{version}</code> 与 <code>metagptx-thinking-{version}</code></li>
+          <li class="r">remix、独立队列 <code>metagptx-queue</code>（端口 8090）</li>
+          <li class="r">TaskIQ task worker 与 scheduler（<code>atomstaskiqtask</code> / <code>atomstaskiqscheduler</code>）</li>
+          <li class="r">若干 CronJob 与一次性 Job</li>
+        </ul>
+      </div>
+      <div class="c4 r" data-at="1900">
+        <div class="big"><span data-count="3" data-at="1900">3</span><small>副本</small></div>
+        <div class="cap">mgx-runtime manager 的 Deployment；leader 才跑 Reconciler 等后台组件。</div>
+      </div>
+      <p class="c12 note sm r" data-at="2000">以上均<b>由配置推断</b>：CI stage、ArgoCD 应用与 AppEnv 工作负载定义都在仓库外；仓库内 k8s yaml 多为 dev 示例，不代表现网。</p>
+    </div>
+    <p class="src r" data-at="1100">证据 · deploy-observability-l7.md 结论 1–3、部署明细 · metagptx-backend/docs/prod-kubernetes-deployments.md:59-64 · mgx-runtime/deploy/deployment.yaml:13</p>
+  </section>
+
+  <!-- 20 可观测性 -->
+  <section class="scene" data-dur="15000" data-end="2400" data-name="可观测性">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>05</b>技术栈、部署与观测</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>串联一次请求靠 X-Request-ID，而不是分布式 trace</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c12">
+        <ol class="flow" data-seq="500,150">
+          <li class="r"><div class="n">01</div><div class="h">nuxt 生成</div><div class="d">X-Request-ID（uuidv7），SSR 结构化日志</div></li>
+          <li class="r"><div class="n">02</div><div class="h">backend atomstel</div><div class="d">解析请求头，向 stdout 写 JSON 访问日志</div></li>
+          <li class="r"><div class="n">03</div><div class="h">TaskIQ label</div><div class="d">context_v1 携带 x-request-id 与泳道</div></li>
+          <li class="r"><div class="n">04</div><div class="h">CLS 检索</div><div class="d">按 __TAG__.pod_name；采集器清单未找到，推断平台统一采集 stdout</div></li>
+        </ol>
+      </div>
+      <div class="c3 card r" data-at="1200" style="margin-top:28px">
+        <div class="no">OTel span</div><div class="big rd"><span data-count="2" data-at="1200">2</span></div>
+        <div class="cap">导出 OTel span 的服务：mgx-user、admin-backend。atomstel 不产出 span。</div>
+      </div>
+      <div class="c3 card r" data-at="1350" style="margin-top:28px">
+        <div class="no">Sentry</div><div class="big"><span data-count="6" data-at="1350">6</span></div>
+        <div class="cap">接入 Sentry 的仓库：nuxt、backend、thinking、wallet、mgx-user、admin-backend。</div>
+      </div>
+      <div class="c3 card r" data-at="1500" style="margin-top:28px">
+        <div class="t s">指标与告警</div>
+        <p class="small">Prometheus：backend :3001、remix :3003、thinking :3004；Nightingale(n9e) 规则 + Grafana 看板。</p>
+      </div>
+      <div class="c3 card r" data-at="1650" style="margin-top:28px">
+        <div class="t s">LLM 与流量</div>
+        <p class="small">Langfuse session = chat_id。Kong traffic-log → forwarder → Kafka <code>mgx-traffic-pv</code> → backend → PostHog。</p>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · deploy-observability-l7.md 结论 4–8 · verify-conflicts-v1.md C1 · mgx-user/internal/telemetry/telemetry.go:46-64 · admin-backend/traceid/telemetry.py:95-99</p>
+  </section>
+
+  <!-- 21 风险与待核 -->
+  <section class="scene" data-dur="16000" data-end="1800" data-name="风险与待核">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>05</b>技术栈、部署与观测</div>
+      <h2 class="h2"><span class="m" data-at="150"><span>风险集中在内部无鉴权边、明文凭据与分支漂移</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c3 card red r" data-at="500">
+        <div class="no">01</div><div class="t s">安全（类别级）</div>
+        <ul class="lst rd sm"><li>若干配置文件提交了明文凭据（finance、ab-manager、admin-backend）</li><li>console 源码硬编码 secret</li><li>内部边无鉴权，见鉴权矩阵</li><li>Socket.IO 用户 JWT 在升级 URL query，可能进网关日志</li></ul>
+      </div>
+      <div class="c3 card r" data-at="650">
+        <div class="no">02</div><div class="t s">遗留与死代码</div>
+        <ul class="lst sm"><li>appgateway 代码与旧调度未下线</li><li>KeepAlive / Recycle 的 V1 回调链</li><li>admin 的 <code>mgx:llm:model:*</code> 死写</li><li>backend 内还有一份 v2.2 的域名路由插件</li></ul>
+      </div>
+      <div class="c3 card r" data-at="800">
+        <div class="no">03</div><div class="t s">分支漂移</div>
+        <ul class="lst sm"><li>ssmb：ab-manager 有、oneapi 当前树无</li><li>chat-quota：两仓 main 有、当前分支无</li><li>mgx_proto 两份锁在不同提交</li><li>backend .venv 的 SDK 0.9.10 缺 serialize_context，gateway 路径推断会 AttributeError</li></ul>
+      </div>
+      <div class="c3 card dash r" data-at="950">
+        <div class="no">04</div><div class="t s">仓库外未取证</div>
+        <ul class="lst sm"><li>thinking-gateway</li><li>atomsdomain</li><li>func-sea-infra</li><li>MGXTracker 服务端</li><li>线上 Nacos 与 AppConfig 实际值</li></ul>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">证据 · lead-notes.md「安全观察」· mech-lane-auth-l5.md · chain-chat-stream-l1.md 待核 4 · verify-conflicts-v1.md C5、C7 · mech-ab-config-l6.md 结论 7</p>
+  </section>
+
+  <!-- 22 结语 -->
+  <section class="scene" data-dur="14000" data-end="2000" data-name="结语">
+    <header class="hd">
+      <div class="kicker r" data-at="0"><b>结语</b></div>
+      <h2 class="h2"><span class="m" data-at="150"><span>一句话进入 backend，排队、执行、构建、发布，再落到两本账</span></span></h2>
+    </header>
+    <div class="bd g12">
+      <div class="c7">
+        <ol class="flow" data-seq="500,140">
+          <li class="r"><div class="n">进入</div><div class="h">HTTP</div><div class="d">nuxt-mgx → backend</div></li>
+          <li class="r"><div class="n">排队</div><div class="h">Redis Stream</div><div class="d">会话级 + 消息级</div></li>
+          <li class="r"><div class="n">执行</div><div class="h">gRPC</div><div class="d">Thinking + MetaGPT</div></li>
+          <li class="r"><div class="n">构建</div><div class="h">MCP</div><div class="d">沙箱 mgx-tool</div></li>
+          <li class="r"><div class="n">发布</div><div class="h">Kong</div><div class="d">静态 / Lambda</div></li>
+        </ol>
+        <div class="note r" data-at="1300" style="margin-top:48px">
+          <div class="label">限制</div>
+          <p class="small" style="margin-top:6px">只读代码调研，基于 2026-10-21 主工作区当前工作树；oneapi、mgx-wallet、ab-manager、nuxt-mgx 等多仓不在 main；未访问线上；“由配置推断”“推断”的内容已逐项标注；线上 Nacos / AppConfig 的实际值未核。</p>
+        </div>
+      </div>
+      <div class="c5 r" data-at="900">
+        <div class="label">证据文件（experiments/006-atoms-architecture/findings/）</div>
+        <ul class="lst sm mono" style="margin-top:4px">
+          <li>map-frontend-m1.md · map-backend-m2.md</li>
+          <li>map-agent-runtime-m3.md · map-gateway-llm-m4.md</li>
+          <li>map-billing-ab-m5.md · map-admin-console-m6.md</li>
+          <li>chain-chat-stream-l1.md</li>
+          <li>mech-sandbox-runtime-l2.md</li>
+          <li>mech-preview-deploy-domain-l3.md</li>
+          <li>mech-billing-l4.md · mech-lane-auth-l5.md</li>
+          <li>mech-ab-config-l6.md</li>
+          <li>deploy-observability-l7.md</li>
+          <li>verify-conflicts-v1.md · lead-notes.md</li>
+        </ul>
+      </div>
+    </div>
+    <p class="src r" data-at="1100">冲突口径以 lead-notes.md「冲突裁定」与 verify-conflicts-v1.md 为准 · 函数之海内部细节见任务 005</p>
+  </section>
+
+  <nav class="progress" id="progress" aria-label="场景"></nav>
+  <div class="hint" id="hintBox"><span id="hint">点击 / → 下一页 · ← 上一页 · A 自动播放</span><button class="mode" id="mode" type="button" aria-pressed="false"><i></i>自动</button></div>
+</div>
+
+<script>
+(() => {
+  const NS = document.getElementById('topo').namespaceURI;
+  const mk = (tag, attrs, parent, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.append(e);
+    return e;
+  };
+  const h = (tag, cls, parent, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.append(e);
+    return e;
+  };
+  const pad = n => String(n).padStart(2, '0');
+  const PROTO = { http: 'HTTP', grpc: 'gRPC', redis: 'Redis Stream', kafka: 'Kafka', sio: 'Socket.IO', proc: '进程内' };
+  const COLOR = { http: '#171717', grpc: '#171717', redis: '#171717', kafka: '#171717', sio: '#df1623', proc: '#6a6a6a' };
+
+  function markers(defs, pre) {
+    Object.keys(COLOR).forEach(p => {
+      const m = mk('marker', { id: pre + p, viewBox: '0 0 12 10', refX: 11, refY: 5, markerWidth: 12, markerHeight: 10, markerUnits: 'userSpaceOnUse', orient: 'auto' }, defs);
+      mk('path', { d: 'M0,0 L12,5 L0,10 z', fill: COLOR[p] }, m);
+    });
+  }
+  // 遮罩描边：可见线保留协议线型，遮罩负责“画出”动画
+  function maskedPath(svg, defs, id, d, proto, at, vb, pre) {
+    const m = mk('mask', { id, maskUnits: 'userSpaceOnUse', x: -20, y: -20, width: vb[0] + 40, height: vb[1] + 40 }, defs);
+    mk('path', { d, class: 'mkp', 'stroke-width': 22, pathLength: 1, 'data-at': at }, m);
+    return mk('path', { d, class: 'ln p-' + proto, mask: `url(#${id})`, 'marker-end': `url(#${pre}${proto})` }, svg);
+  }
+
+  /* ---------- 03 服务拓扑：节点与边来自各 map「跨仓库关系小结」及 l1–l6 修正 ---------- */
+  const NW = 190, NH = 60;
+  const TOPO_NODES = [
+    ['B', '浏览器', '用户端', 100, 295, 'main'],
+    ['N', 'nuxt-mgx', 'SSR · Nitro BFF', 370, 160, 'main'],
+    ['C', 'console-backend', 'i18n · SEO · 配置集', 370, 34, ''],
+    ['K', 'Kong 网关', 'domain · funcsea', 370, 430, ''],
+    ['L', 'Lambda · 静态站', '发布与预览目标', 100, 560, 'ext'],
+    ['BE', 'metagptx-backend', 'API · Socket.IO · gRPC', 660, 295, 'hub'],
+    ['R', 'Redis', 'Stream · pub/sub', 660, 34, ''],
+    ['KF', 'Kafka', '业务 topic', 600, 560, ''],
+    ['AD', 'atomsdomain', '工作区外', 900, 565, 'ext'],
+    ['T', 'mgx-thinking', 'MetaGPT 子进程', 940, 160, 'main'],
+    ['AB', 'admin-backend', 'LlmConfigService 发布', 1000, 485, ''],
+    ['RT', 'mgx-runtime', '沙箱池 manager', 1220, 34, 'main'],
+    ['TL', 'mgx-tool', '沙箱 Pod 内', 1500, 34, 'main'],
+    ['O', 'oneapi', 'LLM 网关 · credit', 1220, 295, 'main'],
+    ['AM', 'ab-manager', '分组缓存', 1500, 295, ''],
+    ['W', 'mgx-wallet', '钱包', 1220, 450, ''],
+    ['U', 'mgx-user', '用户 · 套餐', 1500, 160, 'main'],
+    ['PH', 'PostHog', '外部 SaaS', 1500, 450, 'ext']
+  ];
+  // [起点, 终点, 协议, 标注, {c: 二次曲线控制点, t, dx, dy, a: 文本锚点}]，按依赖方向排序
+  // [起点, 终点, 协议, 图内标注, {c: 二次曲线控制点, t, dx, dy, a: 文本锚点}, 列表全称]；标注位置经离线碰撞检查
+  const TOPO_EDGES = [
+    ['B', 'N', 'http', '页面 SSR', { t: .5, dy: -16, a: 'end' }],
+    ['N', 'BE', 'http', 'SSR 集群内直连', { t: .5, dy: -16, a: 'start' }],
+    ['B', 'BE', 'http', '/api/v1/*', { t: .5, dy: -12 }],
+    ['BE', 'R', 'redis', 'XADD Stream', { t: .5, dx: 10, a: 'start' }],
+    ['T', 'BE', 'grpc', 'ListenChatTask', { t: .5, dy: -16, a: 'end' }, 'ListenChatTask · 回调流'],
+    ['T', 'RT', 'grpc', 'AcquireContainer', { t: .5, dy: -16, a: 'end' }],
+    ['RT', 'TL', 'grpc', 'Allocate', { t: .5, dy: -12 }],
+    ['T', 'TL', 'grpc', 'MGXToolService', { c: [1250, 95], t: .25, dy: 22, a: 'start' }, 'MGXToolService :8090'],
+    ['T', 'TL', 'http', 'MCP over SSE', { c: [1300, 200], t: .8, dx: 24, dy: 10, a: 'start' }],
+    ['T', 'O', 'http', 'OpenAI 兼容 stream', { t: .8, dx: 24, dy: -4, a: 'start' }],
+    ['O', 'W', 'grpc', 'AI Hub 扣费', { t: .5, dx: 10, dy: 14, a: 'start' }],
+    ['BE', 'B', 'sio', 'msg:update', { c: [380, 385], t: .5, dy: -16 }, 'msg:update → 房间 chat:{chat_id}'],
+    ['BE', 'U', 'http', '反代 /v1/user', { t: .35, dy: -12, a: 'end' }],
+    ['BE', 'O', 'http', '用量 / token 管理', { t: .5, dy: -12, a: 'start' }],
+    ['BE', 'W', 'http', 'Bearer 查询 / 入账', { t: .7, dy: -12, a: 'start' }],
+    ['BE', 'AB', 'grpc', '', {}, 'LlmConfigService'],
+    ['BE', 'AM', 'grpc', 'GetUserGroup', { c: [1360, 390], t: .7, dy: 22, a: 'start' }],
+    ['O', 'AM', 'grpc', 'c-c-1', { t: .5, dy: -12 }],
+    ['AM', 'PH', 'http', 'flags', { t: .5, dx: 10, a: 'start' }],
+    ['N', 'C', 'http', '配置 / SEO 拉取', { t: .5, dx: 10, a: 'start' }],
+    ['BE', 'K', 'http', 'Admin API 写路由', { t: .75, dy: 22, a: 'start' }, 'Admin API 写 Route'],
+    ['B', 'K', 'http', '预览 / 发布访问', { t: .5, dy: 22, a: 'end' }],
+    ['K', 'L', 'http', 'Function URL / 静态', { t: .5, dy: -16, a: 'end' }],
+    ['K', 'KF', 'kafka', 'mgx-traffic-pv', { t: .5, dy: 26, a: 'end' }],
+    ['BE', 'AD', 'http', 'X-API-Key 绑定', { t: .5, dx: -10, dy: 14, a: 'end' }],
+    ['AD', 'KF', 'kafka', '状态事件', { t: .5, dy: -12 }],
+    ['KF', 'BE', 'kafka', '消费', { t: .4, dx: -10, a: 'end' }]
+  ];
+
+  function buildTopo() {
+    const svg = document.getElementById('topo');
+    const VB = [1680, 600];
+    const defs = mk('defs', {}, svg);
+    markers(defs, 'ta-');
+    const gE = mk('g', {}, svg), gN = mk('g', {}, svg), gL = mk('g', {}, svg);
+    const N = {};
+    TOPO_NODES.forEach(([id, name, sub, x, y, kind]) => { N[id] = { id, name, sub, x, y, kind }; });
+    const bp = (n, tx, ty) => {
+      const dx = tx - n.x, dy = ty - n.y;
+      const t = Math.min(NW / 2 / Math.abs(dx || 1e-9), NH / 2 / Math.abs(dy || 1e-9));
+      return [n.x + dx * t, n.y + dy * t];
+    };
+    TOPO_NODES.forEach(([id], i) => {
+      const n = N[id];
+      const g = mk('g', { class: 'nd ' + n.kind, 'data-at': 350 + i * 40 }, gN);
+      mk('rect', { x: n.x - NW / 2, y: n.y - NH / 2, width: NW, height: NH }, g);
+      if (n.kind === 'hub') mk('rect', { class: 'hb', x: n.x - NW / 2, y: n.y - NH / 2, width: NW, height: 7 }, g);
+      mk('text', { class: 'nm', x: n.x, y: n.y - 2, 'text-anchor': 'middle' }, g, n.name);
+      mk('text', { class: 'sb', x: n.x, y: n.y + 19, 'text-anchor': 'middle' }, g, n.sub);
+    });
+    const list = document.getElementById('topoList');
+    const gLab = [];
+    TOPO_EDGES.forEach(([f, to, proto, label, o], i) => {
+      const a = N[f], b = N[to], c = o.c;
+      const s = c ? bp(a, c[0], c[1]) : bp(a, b.x, b.y);
+      const e = c ? bp(b, c[0], c[1]) : bp(b, a.x, a.y);
+      // 终点回退 2px，箭头尖贴住节点边框
+      const ref = c || s, len = Math.hypot(e[0] - ref[0], e[1] - ref[1]) || 1;
+      const ee = [e[0] - (e[0] - ref[0]) / len * 2, e[1] - (e[1] - ref[1]) / len * 2];
+      const d = c ? `M${s[0].toFixed(1)} ${s[1].toFixed(1)} Q${c[0]} ${c[1]} ${ee[0].toFixed(1)} ${ee[1].toFixed(1)}`
+                  : `M${s[0].toFixed(1)} ${s[1].toFixed(1)} L${ee[0].toFixed(1)} ${ee[1].toFixed(1)}`;
+      const at = 1300 + i * 120;
+      maskedPath(gE, defs, 'tm' + i, d, proto, at, VB, 'ta-');
+      if (!label) return;
+      const t = o.t ?? .5;
+      const p = c ? [(1 - t) ** 2 * s[0] + 2 * t * (1 - t) * c[0] + t * t * e[0], (1 - t) ** 2 * s[1] + 2 * t * (1 - t) * c[1] + t * t * e[1]]
+                  : [s[0] + (e[0] - s[0]) * t, s[1] + (e[1] - s[1]) * t];
+      // 标注底衬：paper 色矩形，四周留 4px，盖住经过的线
+      const g = mk('g', { class: 'fd', 'data-at': at + 350 }, gL);
+      const bg = mk('rect', { class: 'elb' }, g);
+      const tx = (p[0] + (o.dx || 0)), ty = (p[1] + (o.dy || 0)), anc = o.a || 'middle';
+      const txt = mk('text', { class: 'el', x: tx.toFixed(1), y: ty.toFixed(1), 'text-anchor': anc }, g, label);
+      gLab.push([bg, txt, tx, ty, anc, label]);
+    });
+    // getBBox 在不渲染（窄屏 display:none）时可能为 0 或抛错，退回按字数估算
+    gLab.forEach(([bg, txt, tx, ty, anc, label]) => {
+      let bb = null;
+      try { bb = txt.getBBox(); } catch (_) { bb = null; }
+      if (!bb || !bb.width) {
+        const w = [...label].reduce((n, ch) => n + (/[\u3000-\u9fff\uff00-\uffef]/.test(ch) ? 16 : 8.8), 0);
+        bb = { x: anc === 'middle' ? tx - w / 2 : anc === 'end' ? tx - w : tx, y: ty - 13, width: w, height: 17 };
+      }
+      bg.setAttribute('x', (bb.x - 4).toFixed(1));
+      bg.setAttribute('y', (bb.y - 4).toFixed(1));
+      bg.setAttribute('width', (bb.width + 8).toFixed(1));
+      bg.setAttribute('height', (bb.height + 8).toFixed(1));
+    });
+    // 窄屏列表：先列经过 backend 的边，突出“拓扑中心”这条断言
+    const viaBE = TOPO_EDGES.filter(e => e[0] === 'BE' || e[1] === 'BE');
+    const rest = TOPO_EDGES.filter(e => e[0] !== 'BE' && e[1] !== 'BE');
+    const cap = h('li', 'gh r', list, `${TOPO_EDGES.length} 条边中 ${viaBE.length} 条经过 metagptx-backend`);
+    cap.dataset.at = 300;
+    let k = 0;
+    [[viaBE, null], [rest, `其余 ${rest.length} 条`]].forEach(([arr, title]) => {
+      if (title) { const gh = h('li', 'gh r', list, title); gh.dataset.at = 300 + k * 50; }
+      arr.forEach(([f, to, proto, label, o, full]) => {
+        const li = h('li', 'r', list);
+        li.dataset.at = 320 + k * 50;
+        h('span', 'n', li, pad(++k));
+        const nm = h('span', '', li);
+        [f, to].forEach((id, j) => {
+          if (j) nm.append(' → ');
+          id === 'BE' ? h('b', '', nm, N[id].name) : nm.append(N[id].name);
+        });
+        h('span', 'd', li, `${PROTO[proto]} · ${full || label}`);
+      });
+    });
+  }
+
+  /* ---------- 04 端到端时序：步骤来自 chain-chat-stream-l1「时序」 ---------- */
+  const LANES = ['浏览器', 'metagptx-backend', 'Redis', 'Thinking 主进程', 'Thinking 子进程', 'mgx-runtime', 'mgx-tool 沙箱', 'oneapi'];
+  const STEPS = [
+    [0, 1, 'http', 'HTTP', 'POST /api/v1/chats/{chat_id}/messages，先限流再落库'],
+    [1, 2, 'redis', 'Redis Stream', 'XADD mgx:chat:event:{chat_id}:message'],
+    [1, 2, 'redis', 'Redis Stream', '无存活子进程时 XADD mgx:chat:task[:lane]'],
+    [1, 3, 'grpc', 'gRPC', 'ListenChatTask：XREADGROUP 后 yield ChatTask{chat_id, config}'],
+    [3, 4, 'proc', '进程 fork', 'fork 子进程，上行 CHAT_DONE'],
+    [1, 4, 'grpc', 'gRPC', 'StreamChatCallback 下发 MESSAGE'],
+    [4, 5, 'grpc', 'gRPC', 'AcquireContainer(user_id) 申领沙箱'],
+    [4, 6, 'http', 'MCP over SSE', 'GET /sse + POST /messages 调工具'],
+    [4, 7, 'http', 'HTTPS', 'OpenAI 兼容，stream=True'],
+    [4, 1, 'grpc', 'gRPC', 'StreamMessageCallback 逐 chunk 上送正文'],
+    [1, 0, 'sio', 'Socket.IO', 'msg:update{content_index} → 房间 chat:{chat_id}']
+  ];
+  function buildSeq() {
+    const svg = document.getElementById('seq');
+    const VB = [1680, 536];
+    const defs = mk('defs', {}, svg);
+    markers(defs, 'sa-');
+    const X = i => 105 + i * 210, Y0 = 90, DY = 42;
+    const gLife = mk('g', {}, svg), gHead = mk('g', {}, svg), gMsg = mk('g', {}, svg), gTxt = mk('g', {}, svg);
+    LANES.forEach((name, i) => {
+      mk('path', { d: `M${X(i)} 52 V530`, class: 'drw sq-l', pathLength: 1, 'data-at': 500 + i * 60 }, gLife);
+      const g = mk('g', { class: 'nd sq-h' + (i === 1 ? ' hl' : ''), 'data-at': 300 + i * 60 }, gHead);
+      mk('rect', { x: X(i) - 98, y: 0, width: 196, height: 50 }, g);
+      if (i === 1) mk('rect', { class: 'hb', x: X(i) - 98, y: 0, width: 196, height: 6 }, g);
+      mk('text', { x: X(i), y: 32, 'text-anchor': 'middle' }, g, name);
+    });
+    const list = document.getElementById('seqList');
+    STEPS.forEach(([f, to, proto, pname, label], i) => {
+      const y = Y0 + i * DY, dir = to > f ? 1 : -1;
+      const x1 = X(f) + dir * 4, x2 = X(to) - dir * 4;
+      const at = 1100 + i * 400;
+      maskedPath(gMsg, defs, 'sm' + i, `M${x1} ${y} H${x2}`, proto, at, VB, 'sa-');
+      const tx = mk('text', { class: 'sq-t fd', x: Math.min(X(f), X(to)) + 14, y: y - 9, 'data-at': at + 250 }, gTxt);
+      mk('tspan', { class: 'sn' }, tx, pad(i + 1) + '  ');
+      mk('tspan', { class: 'pr' }, tx, pname);
+      mk('tspan', {}, tx, ' · ' + label);
+      const li = h('li', 'r', list);
+      li.dataset.at = 300 + i * 120;
+      h('span', 'n', li, pad(i + 1));
+      h('span', '', li, `${LANES[f]} → ${LANES[to]} · ${pname}`);
+      h('span', 'd', li, label);
+    });
+  }
+
+  /* ---------- 16 鉴权矩阵：来自 mech-lane-auth-l5「鉴权矩阵」，只写凭据类型 ---------- */
+  const CREDS = ['用户 JWT', 'S2S token', 'AES token', '全局 token', 'API Key', '服务 JWT', 'HMAC 票据', '无鉴权'];
+  const AUTH = [
+    ['浏览器 → backend /api', 0, 'HS256，jwt.sys_secret；Authorization 原样'],
+    ['浏览器 → Socket.IO', 0, 'token 放在 websocket 升级 URL query'],
+    ['沙箱 / FuncSea → backend', 1, 's2s- 前缀，RSA 密钥对（s2s_jwt.*）'],
+    ['Thinking 子进程 → backend 回调', 2, 'metadata token = AES(user_id),chat_id'],
+    ['Thinking 主进程 → ListenChatTask', 7, '只读 client_id，推断靠内网隔离'],
+    ['Thinking → mgx-runtime 管理端', 3, 'server.token 为空时不校验'],
+    ['backend → admin LlmConfigService', 7, 'insecure gRPC，无拦截器'],
+    ['backend → ab-manager', 7, 'insecure gRPC，无拦截器'],
+    ['backend → appgateway / atomsdomain', 4, 'X-API-Key'],
+    ['appgateway → kong-service', 7, 'CORS *，推断靠网络隔离'],
+    ['kong-service → Kong Admin API', 7, '客户端可带 Kong-Admin-Token，仓库配置未见服务端校验（由配置推断）'],
+    ['backend / oneapi → mgx-wallet', 5, 'Bearer JWT（JWT_SECRET）'],
+    ['Agent / 应用 → oneapi relay', 4, 'Bearer sk-key；应用 token 名 app_{chat_id}'],
+    ['浏览器 → Kong 预览', 6, 'cookie _preview_ticket，TTL 3600s'],
+    ['backend → console i18n 读取', 7, '控制器无 Guard']
+  ];
+  function buildAuth() {
+    const box = document.getElementById('authm');
+    const th = h('div', 'tr th r', box);
+    th.dataset.at = 400;
+    h('span', '', th, '调用边');
+    CREDS.forEach(c => h('span', '', th, c));
+    h('span', '', th, '备注（只写类型与键名）');
+    const body = h('div', '', box);
+    AUTH.forEach(([edge, ci, note], i) => {
+      const row = h('div', 'tr r' + (ci === 7 ? ' bad' : ''), body);
+      row.dataset.at = 600 + i * 150;
+      h('span', 'ed', row, edge);
+      CREDS.forEach((c, j) => {
+        const cell = h('span', 'cell' + (j === 7 ? ' no' : ''), row);
+        if (j === ci) h('i', '', cell);
+      });
+      const nt = h('span', 'nt', row);
+      h('span', 'mob', nt, '凭据：' + CREDS[ci]);
+      nt.append(note);
+    });
+  }
+
+  buildTopo();
+  buildSeq();
+  buildAuth();
+
+  /* ---------- 场景时钟（规格：swiss-deck-controls-spec.md） ---------- */
+  const fit = () => document.documentElement.style.setProperty('--s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  addEventListener('resize', fit); fit();
+
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = p => RM ? (p > 0 ? 1 : 0) : 1 - Math.pow(1 - p, 3);
+
+  document.querySelectorAll('[data-seq]').forEach(p => {
+    const [a, b] = p.dataset.seq.split(',').map(Number);
+    [...p.children].forEach((c, i) => { if (!c.dataset.at) c.dataset.at = a + i * b; });
+  });
+
+  const stage = document.getElementById('stage');
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({
+    el, dur: +el.dataset.dur, end: +(el.dataset.end || el.dataset.dur), name: el.dataset.name,
+    cues: [...el.querySelectorAll('[data-at]')].map(e => ({ e, at: +e.dataset.at })),
+    counts: [...el.querySelectorAll('[data-count]')].map(e => {
+      const host = e.closest('[data-at]');
+      return { e, v: +e.dataset.count, at: host ? +host.dataset.at : 0 };
+    })
+  }));
+
+  const progress = document.getElementById('progress');
+  const segs = scenes.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg';
+    b.type = 'button';
+    b.setAttribute('aria-label', `第 ${i + 1} 幕：${s.name}`);
+    b.innerHTML = '<i></i>';
+    b.addEventListener('click', e => { e.stopPropagation(); go(i); });
+    progress.append(b);
+    return b;
+  });
+  // 控件区域的点击不冒泡到舞台
+  progress.addEventListener('click', e => e.stopPropagation());
+  document.getElementById('hintBox').addEventListener('click', e => e.stopPropagation());
+
+  const label = document.getElementById('sceneLabel');
+  const hint = document.getElementById('hint');
+  const modeBtn = document.getElementById('mode');
+
+  let cur = 0, t = 0, paused = false, last = performance.now(), leaving = null, snapNext = false, floor = 0;
+  let auto = new URLSearchParams(location.search).get('mode') === 'auto';
+
+  // floor：已跳到终态的页面至少按结束时刻绘制（自动模式下时钟仍从 0 走到 data-dur）
+  function paint(s, all) {
+    const tv = Math.max(t, floor);
+    for (const c of s.cues) if (all || tv >= c.at) c.e.classList.add('on');
+    for (const c of s.counts) c.e.textContent = all ? c.v : Math.round(c.v * ease(clamp((tv - c.at) / 900)));
+  }
+  function snap(s) {
+    s.el.classList.add('snap');
+    t = s.end;
+    paint(s, true);
+    void s.el.offsetWidth;
+    s.el.classList.remove('snap');
+  }
+  function finishLeave() {
+    leaving.el.classList.remove('is-leaving');
+    leaving.cues.forEach(c => c.e.classList.remove('on'));
+    leaving = null;
+  }
+  function go(i, final = false) {
+    i = (i + scenes.length) % scenes.length;
+    if (leaving) finishLeave();
+    const old = scenes[cur];
+    old.el.classList.remove('is-active');
+    old.el.classList.add('is-leaving');
+    leaving = old;
+    cur = i; t = -220; snapNext = final; floor = 0;
+    label.textContent = `${pad(cur + 1)} / ${pad(scenes.length)}　${scenes[cur].name}`;
+  }
+  function next() {
+    if (cur === scenes.length - 1) return;
+    const s = scenes[cur];
+    if (s.el.classList.contains('is-active') && t < s.end) snap(s);
+    go(cur + 1);
+  }
+  function prev() {
+    if (cur > 0) go(cur - 1, true);
+  }
+  function render() {
+    hint.textContent = !auto ? '点击 / → 下一页 · ← 上一页 · A 自动播放'
+      : paused ? '已暂停 · 空格 / 点击 继续' : '空格 / 点击 暂停 · ← → 切换 · A 手动模式';
+    modeBtn.setAttribute('aria-pressed', auto);
+  }
+  function setPaused(v) { paused = v; render(); }
+  function setAuto(v) {
+    auto = v; paused = false;
+    if (!auto) t = Math.max(Math.min(t, scenes[cur].end), floor);
+    render();
+  }
+
+  function tick(now) {
+    const dt = Math.min(now - last, 100);
+    last = now;
+    const s = scenes[cur];
+    if (!(auto && paused)) t += dt;
+    if (!auto) t = Math.min(t, s.end);
+    if (t >= 0 && !s.el.classList.contains('is-active')) {
+      if (leaving) finishLeave();
+      s.el.scrollTop = 0;
+      // 未激活时过渡已关闭：此时绘制的状态不会产生动画
+      if (snapNext || RM) { floor = s.end; if (!auto) t = s.end; paint(s, true); }
+      else paint(s);
+      snapNext = false;
+      void s.el.offsetWidth;
+      s.el.classList.add('is-active');
+    }
+    if (t >= 0) paint(s);
+    segs.forEach((b, i) => {
+      b.classList.toggle('cur', i === cur);
+      b.firstChild.style.setProperty('--p', i < cur ? 1 : i > cur ? 0 : clamp(t / (auto ? s.dur : s.end)));
+    });
+    if (auto && t >= s.dur) go(cur + 1);
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'a' || e.key === 'A') setAuto(!auto);
+    else if (e.code === 'Space') { e.preventDefault(); auto ? setPaused(!paused) : next(); }
+    else if (e.key === 'ArrowRight') auto ? go(cur + 1) : next();
+    else if (e.key === 'ArrowLeft') auto ? go(cur - 1) : prev();
+    else if (!auto && e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (!auto && e.key === 'PageUp') { e.preventDefault(); prev(); }
+  });
+  stage.addEventListener('click', () => auto ? setPaused(!paused) : next());
+  modeBtn.addEventListener('click', e => { e.stopPropagation(); setAuto(!auto); });
+
+  label.textContent = `01 / ${pad(scenes.length)}　${scenes[0].name}`;
+  render();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

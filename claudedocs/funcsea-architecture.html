@@ -1,0 +1,1197 @@
+<!doctype html>
+<!--
+约束简报（refactoring-ui Workflow B，先于标记写下）
+Step 0：纯 HTML，无框架、无 Tailwind、无组件库、无暗色模式；token 沿用已验收的 claudedocs/agenthelm-intro.html 与 metagpt-harness.html。
+风格：瑞士国际主义 —— 12 栏网格、齐左、无衬线、黑白 + 单一红色强调、细线、方块与大号数字。
+事实来源：experiments/005-funcsea-architecture/findings/lead-notes.md §2 §3（§1 裁定优先；细节查同目录 A–F、verify、hitmap）。
+
+内容排序（每幕一个主信息）
+  主：函数之海 = Atoms 的全栈后端模式（对用户叫 Atoms Cloud）：一个开关、一个全栈模板、一组基础设施服务。
+  次：各幕结构图（三层、生命周期接管点、准入闸、模板拼装、路由分流、占位符、部署泳道、状态机、发布、域名、数据、计费、恢复与删除）。
+  三：repo/path:line 出处脚注、未确认项、限制。
+  主操作：无（演示文稿）；控制只有翻页、模式开关与进度条。
+
+Token（check_contrast.py 已复验）
+  paper #fafafa · line #dbdbdb · line-2 #bdbdbd（仅装饰：边框、未激活条）
+  ink #171717 (17.18:1) · ink-2 #6a6a6a (5.18:1) · red-text #c70b16 (5.77:1)
+  red #df1623：只作面与线；红底、墨底上只用 paper 字（4.70:1 / 17.18:1）。
+  文字色仅三种：ink / ink-2 / red-text（红底与墨底上为 paper）。
+  字号：18 20 24 30 36 48 72 96 128；192 仅用于封面标题。字重仅 400 / 700。
+  间距：4 8 12 16 24 32 48 64 96 128。
+  网格：1920×1080 舞台，左右边距 120，栏宽 118，栏距 24；内容区 1680×792（脚注 744，两行脚注 716）。
+动效：入场 600–700ms cubic-bezier(.2,0,0,1)，离场 200ms 加速；错位 40–120ms；
+  reduced-motion 时只保留 opacity，计数直接显示终值，移动的令牌隐藏。
+路径缩写：BE=metagptx-backend TH=mgx-thinking/mgx_thinking MG=MetaGPT/metagpt TPL=mgx_template/templates/function_sea
+  INFRA/DSVC/COST=funcsea-infra / funcsea-deploysvc / funcsea-cost FE=nuxt-mgx/packages
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>函数之海 FuncSea · 架构</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --paper:#fafafa;--line:#dbdbdb;--line-2:#bdbdbd;
+  --ink:#171717;--ink-2:#6a6a6a;--red:#df1623;--red-text:#c70b16;
+  --ease:cubic-bezier(.2,0,0,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --sans:"Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB",sans-serif;
+  --mono:"SF Mono",Menlo,Consolas,"PingFang SC",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);overflow:hidden}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform:translate(-50%,-50%) scale(var(--s,1));
+  background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:20px;line-height:1.6;overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+svg text{font-family:var(--sans)}
+.mono{font-family:var(--mono)}
+.nw{white-space:nowrap}
+.muted{color:var(--ink-2)}
+.accent{color:var(--red-text)}
+.b{font-weight:700}
+.small{font-size:18px}
+h2,p,dl,dd,ul{margin:0;padding:0}
+ul{list-style:none}
+
+/* 外框 */
+.top{position:absolute;top:48px;left:120px;right:120px;display:flex;justify-content:space-between;align-items:baseline;
+  padding-bottom:24px;border-bottom:2px solid var(--ink)}
+.top .b{font-size:20px}
+.top .muted{font-variant-numeric:tabular-nums}
+.progress{position:absolute;left:120px;right:120px;bottom:60px;display:flex;gap:8px}
+.seg{flex:1;padding:12px 0;border:0;background:none;cursor:pointer}
+.seg i{position:relative;display:block;height:4px;background:var(--line)}
+.seg i::after{content:"";position:absolute;inset:0;background:var(--ink);transform:scaleX(var(--p,0));transform-origin:left}
+.seg.cur i::after{background:var(--red)}
+.seg:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.hint{position:absolute;right:120px;bottom:24px;display:flex;align-items:center;gap:24px;font-size:18px;color:var(--ink-2)}
+.mode{display:flex;align-items:center;gap:12px;height:28px;padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer}
+.mode i{position:relative;width:40px;height:20px;border:2px solid var(--ink-2);flex:none;transition:background 200ms var(--ease),border-color 200ms var(--ease)}
+.mode i::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;background:var(--ink-2);transition:transform 200ms var(--ease),background 200ms var(--ease)}
+.mode[aria-pressed=true]{color:var(--ink);font-weight:700}
+.mode[aria-pressed=true] i{background:var(--red);border-color:var(--red)}
+.mode[aria-pressed=true] i::after{background:var(--paper);transform:translateX(20px)}
+.mode:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+
+/* 场景 */
+.scene{position:absolute;top:160px;left:120px;width:1680px;height:792px;opacity:0;visibility:hidden}
+.scene.is-active{opacity:1;visibility:visible}
+.scene.is-leaving{opacity:0;visibility:visible;transition:opacity 200ms var(--ease-in)}
+.scene>*{position:absolute}
+.scene:not(.is-active):not(.is-leaving) *,.scene.snap *{transition:none!important}
+
+.h2{font-size:48px;font-weight:700;line-height:1.2;letter-spacing:-.01em;white-space:nowrap}
+.label{font-size:20px;font-weight:700}
+.fn{top:744px;left:0;width:1680px;padding-top:12px;border-top:1px solid var(--line);font-size:18px;line-height:1.6;color:var(--ink-2);white-space:nowrap}
+.fn.two{top:716px}
+.fn .mono{margin-left:12px}
+.fn .mono.cont{margin-left:48px}
+
+/* 揭示原语 */
+.r{opacity:0;transform:translateY(24px);transition:opacity 600ms var(--ease),transform 600ms var(--ease)}
+.r.on{opacity:1;transform:none}
+.sl{opacity:0;transform:translateX(-48px);transition:opacity 600ms var(--ease),transform 700ms var(--ease)}
+.sl.on{opacity:1;transform:none}
+.fade{opacity:0;transition:opacity 400ms var(--ease)}
+.fade.on{opacity:1}
+.m{display:block;overflow:hidden;padding-bottom:.12em;margin-bottom:-.12em}
+.m>span{display:block;transform:translateY(110%);transition:transform 700ms var(--ease)}
+.m.on>span{transform:none}
+.wx{transform:scaleX(0);transform-origin:left;transition:transform 700ms var(--ease)}
+.wx.on{transform:none}
+.wy{transform:scaleY(0);transform-origin:top;transition:transform 700ms var(--ease)}
+.wy.on{transform:none}
+.dl{stroke-dasharray:1 1;stroke-dashoffset:1;transition:stroke-dashoffset 700ms var(--ease)}
+.dl.on{stroke-dashoffset:0}
+.hr{height:2px;background:var(--ink)}
+.hr1{height:1px;background:var(--line)}
+.vr{width:2px;background:var(--ink)}
+
+/* 通用节点 */
+.box{border:2px solid var(--ink);background:var(--paper);padding:16px 24px}
+.box.hub{border-top:8px solid var(--red)}
+.box.dash{border:2px dashed var(--line-2)}
+.box .t{font-size:30px;font-weight:700;line-height:1.2}
+.box .t.sm{font-size:24px;line-height:1.3}
+.box .s{font-size:18px;color:var(--ink-2);margin-top:4px;line-height:1.5}
+.big{font-size:128px;font-weight:700;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.n96{font-size:96px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.n72{font-size:72px;font-weight:700;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.n48{font-size:48px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.chip{display:inline-block;font-family:var(--mono);font-size:18px;line-height:28px;padding:0 12px;border:1px solid var(--line-2);white-space:nowrap}
+.chip.k{border:2px solid var(--ink);line-height:26px}
+.tok{fill:var(--red)}
+.runner{width:16px;height:16px;background:var(--red);opacity:0}
+.arrow{height:2px;background:var(--ink)}
+.arrow::after{content:"";position:absolute;right:-2px;top:-7px;border:8px solid transparent;border-left:12px solid var(--ink);border-right:0}
+.arrow.mut{background:var(--line-2)}
+.arrow.mut::after{border-left-color:var(--line-2)}
+.ln{stroke:var(--ink);stroke-width:2;fill:none}
+.ln.red{stroke:var(--red)}
+.ln.mut{stroke:var(--line-2)}
+.ln.dash{stroke-dasharray:8 8}
+.ahd{fill:var(--ink)}
+.el{font-size:18px;fill:var(--ink-2)}
+.redblock{background:var(--red);color:var(--paper);display:flex;flex-direction:column;padding:32px}
+.display{font-size:192px;font-weight:700;line-height:.92;letter-spacing:-.04em}
+
+/* S1 */
+.sea{height:2px;background:var(--red)}
+.sea-l{font-size:20px;font-weight:700;line-height:32px;color:var(--red-text)}
+.sea-c{font-size:18px;line-height:32px;color:var(--ink-2)}
+
+/* S2 */
+.band{left:0;width:1680px;height:176px;border-top:2px solid var(--ink);padding-top:24px;display:grid;grid-template-columns:402px 1254px;column-gap:24px}
+.band .n{font-size:20px;font-weight:700;color:var(--red-text);line-height:1.2}
+.band .t{font-size:36px;font-weight:700;line-height:1.2;margin-top:8px}
+.band .d{font-size:20px;color:var(--ink-2);margin-top:8px}
+.band .code{font-family:var(--mono);font-size:30px;font-weight:700;line-height:1.3;white-space:nowrap}
+.band .row{display:flex;align-items:center;gap:12px;white-space:nowrap;line-height:40px}
+.band .row .chip{font-size:24px;line-height:40px;padding:0 16px;border:2px solid var(--ink)}
+.band .row span.muted{margin-right:16px}
+.band .sub{font-size:20px;color:var(--ink-2);margin-top:12px}
+
+/* S3 */
+.mod{height:64px;border:2px solid var(--line-2);padding:0 16px;display:flex;align-items:center;gap:16px;color:var(--ink-2);background:var(--paper);
+  transition:border-color 300ms var(--ease),color 300ms var(--ease)}
+.mod i{width:12px;height:12px;background:var(--line-2);flex:none;transition:background 300ms var(--ease)}
+.mod .mono{font-size:24px;font-weight:700}
+.mod span:last-child{font-size:18px;margin-left:auto}
+.mod.lit{border-color:var(--ink);color:var(--ink)}
+.mod.lit i{background:var(--red)}
+.tagr{display:inline-block;background:var(--red);color:var(--paper);padding:0 12px;line-height:36px;font-size:20px;font-weight:700;white-space:nowrap}
+
+/* S4 生命周期 */
+.lnode .ld{position:absolute;left:0;top:268px;width:24px;height:24px;border:2px solid var(--ink);background:var(--paper);transition:background 200ms var(--ease)}
+.lnode.lit .ld{background:var(--ink)}
+.lnode.tk .ld{left:-8px;top:260px;width:40px;height:40px;border-color:var(--red)}
+.lnode.tk.lit .ld{background:var(--red)}
+.lnode .lnm{position:absolute;left:0;top:320px;width:118px}
+.lnode .lnm .n{font-size:18px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.lnode .lnm .t{font-size:20px;font-weight:700;line-height:1.3;white-space:nowrap}
+.lnode .br{position:absolute;left:0;top:416px;width:118px;height:4px;background:var(--line);transition:background 300ms var(--ease)}
+.lnode.lit .br{background:var(--red)}
+.lnode .brt{position:absolute;left:0;top:428px;font-size:18px;color:var(--ink-2);white-space:nowrap;transition:color 300ms var(--ease)}
+.lnode.lit .brt{color:var(--red-text)}
+.lnode .tkl{position:absolute;left:-8px;top:212px;font-size:20px;font-weight:700;color:var(--red-text);white-space:nowrap;opacity:0;transition:opacity 300ms var(--ease)}
+.lnode.lit .tkl{opacity:1}
+.ex{border-top:4px solid var(--red);padding-top:16px}
+.ex .t{font-size:24px;font-weight:700;line-height:1.3}
+.ex p{font-size:20px;margin-top:8px}
+.ex .mono{font-size:18px;color:var(--ink-2);margin-top:8px}
+
+/* S5 链 */
+.cb{height:120px;border:2px solid var(--ink);padding:16px;background:var(--paper);transition:background 200ms var(--ease),color 200ms var(--ease),border-color 200ms var(--ease)}
+.cb .mono{font-size:20px;font-weight:700;line-height:1.3;white-space:nowrap}
+.cb .t{font-size:24px;font-weight:700;line-height:1.3;white-space:nowrap}
+.cb .s{font-size:18px;color:var(--ink-2);line-height:1.4;margin-top:8px;transition:color 200ms var(--ease)}
+.cb.lit{background:var(--ink);color:var(--paper)}
+.cb.lit .s{color:var(--paper)}
+.cb.fin.lit{background:var(--red);border-color:var(--red)}
+.cb.dash{height:88px;border:2px dashed var(--line-2);color:var(--ink-2)}
+.cb.dash .mono,.cb.dash .t{font-size:20px}
+.cref{font-family:var(--mono);font-size:18px;line-height:1.5;color:var(--ink-2)}
+.strike{height:4px;background:var(--red)}
+
+/* S6 闸 */
+.chan{height:2px;background:var(--line-2)}
+.gate{width:16px;height:208px;background:var(--ink);transition:transform 600ms var(--ease)}
+.gate.on{transform:translateY(-120px)}
+.gate.open{transform:translateY(-120px);background:none;border:2px dashed var(--ink-2)}
+.gt .n{font-size:18px;font-weight:700;color:var(--red-text)}
+.gt .t{font-size:24px;font-weight:700;line-height:1.3;white-space:nowrap}
+.gt .mono{font-size:18px;color:var(--red-text);margin-top:4px}
+.gt p{font-size:18px;color:var(--ink-2);line-height:1.5;margin-top:4px}
+.gt .chip{margin-left:8px;vertical-align:3px}
+.pass{font-size:18px;font-weight:700;color:var(--red-text)}
+#gtok{left:0;top:288px;width:24px;height:24px;background:var(--red);opacity:0}
+
+/* S7 模板 */
+.mc{height:56px;border:2px solid var(--ink);padding:0 16px;line-height:52px;font-family:var(--mono);font-size:20px;font-weight:700;background:var(--paper)}
+.pb li{font-size:20px;line-height:1.5;padding:8px 0;border-top:1px solid var(--line)}
+.pb li:first-child{border-top:0}
+.slot{display:flex;justify-content:space-between;height:40px;line-height:40px;border-top:1px solid var(--line);font-family:var(--mono);font-size:18px;color:var(--ink-2)}
+.slot b{color:var(--red-text)}
+.kvt{display:grid;grid-template-columns:162px 104px 104px;column-gap:0;font-size:18px}
+.kvt>span{height:44px;line-height:44px;border-top:1px solid var(--line);white-space:nowrap}
+.kvt>.h{font-weight:700;border-top:0}
+.sdk li{font-size:20px;line-height:48px;border-top:1px solid var(--line)}
+
+/* S8 工具 */
+.tr{left:0;width:1112px;height:64px;border-top:1px solid var(--line);display:grid;grid-template-columns:284px 568px 260px;align-items:center}
+.tr .nm{font-family:var(--mono);font-size:24px;font-weight:700;white-space:nowrap}
+.tr .ds{font-size:20px}
+.tr.gr .nm,.tr.gr .ds{color:var(--ink-2)}
+.tgt{display:inline-block;font-family:var(--mono);font-size:18px;line-height:36px;padding:0 16px;border:2px solid var(--ink);white-space:nowrap}
+.tgt.dash{border-style:dashed;border-color:var(--line-2);color:var(--ink-2)}
+.th{left:0;width:1112px;display:grid;grid-template-columns:284px 568px 260px;font-size:18px;color:var(--ink-2)}
+
+/* S9 路由 */
+.rt{left:852px;width:828px;height:72px;display:grid;grid-template-columns:260px 1fr;column-gap:24px;align-items:center}
+.rt .pth{height:72px;border:2px solid var(--line-2);padding:0 16px;line-height:68px;font-family:var(--mono);font-size:20px;font-weight:700;color:var(--ink-2);white-space:nowrap;
+  transition:background 200ms var(--ease),color 200ms var(--ease),border-color 200ms var(--ease)}
+.rt .dst{font-size:20px;color:var(--ink-2);white-space:nowrap;transition:color 200ms var(--ease)}
+.rt.lit .pth{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.rt.lit .dst{color:var(--ink)}
+.facts li{font-size:20px;line-height:1.5;padding:12px 0;border-top:1px solid var(--line)}
+
+/* S10 占位符 */
+.pc{width:402px;height:480px;border-top:2px solid var(--ink);padding-top:24px}
+.pc .n{font-size:18px;font-weight:700;color:var(--ink-2);transition:color 300ms var(--ease)}
+.pc .t{font-size:30px;font-weight:700;line-height:1.2;color:var(--ink-2);transition:color 300ms var(--ease)}
+.pc .who{font-family:var(--mono);font-size:20px;color:var(--ink-2);margin-top:12px;white-space:nowrap}
+.pc.lit .n{color:var(--red-text)}
+.pc.lit .t{color:var(--ink)}
+.ptag{height:72px;border:2px solid var(--ink);padding:0 16px;line-height:68px;font-family:var(--mono);font-size:20px;font-weight:700;white-space:nowrap;background:var(--paper)}
+.ptag.q{border-style:dashed;border-color:var(--ink-2);color:var(--ink-2);display:flex;justify-content:space-between}
+.ptag.q b{color:var(--red-text);font-size:30px}
+.pc-x{font-size:20px;color:var(--ink-2);line-height:1.5}
+#pcar{left:0;top:96px;width:402px;height:8px;background:var(--red);opacity:0;transition:transform 500ms var(--ease),opacity 300ms var(--ease)}
+
+/* S11 泳道 */
+.lh{height:48px;border:2px solid var(--ink);font-size:20px;font-weight:700;line-height:44px;text-align:center;background:var(--paper)}
+.lfl{stroke:var(--line-2);stroke-width:2;stroke-dasharray:4 8}
+.msg{stroke:var(--ink);stroke-width:2;fill:none}
+.msg.back{stroke:var(--red)}
+.ml{position:absolute;font-size:18px;line-height:28px;padding:0 4px;background:var(--paper);white-space:nowrap}
+.act{fill:var(--ink)}
+.lgd{position:absolute;left:0;width:402px;height:44px;display:flex;gap:16px;align-items:center;font-size:18px;color:var(--ink-2);white-space:nowrap;transition:color 200ms var(--ease)}
+.lgd .n{width:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.lgd.lit{color:var(--ink)}
+.lgd.lit .n{color:var(--red-text)}
+#qbar{background:var(--line)}
+#qfill{position:absolute;left:0;top:0;bottom:0;width:100%;background:var(--red);transform-origin:left;transform:scaleX(0)}
+
+/* S12 状态机 */
+.st rect{fill:var(--paper);stroke:var(--ink);stroke-width:2;transition:fill 200ms var(--ease),stroke 200ms var(--ease)}
+.st text{font-size:24px;font-weight:700;fill:var(--ink);transition:fill 200ms var(--ease)}
+.st.cur rect{fill:var(--ink);stroke:var(--ink)}
+.st.cur text{fill:var(--paper)}
+.st.cur text.stg{fill:var(--paper)}
+.st.cur text.stg.hot{fill:var(--paper)}
+.st.end.cur rect{fill:var(--red);stroke:var(--red)}
+.stg{font-family:var(--mono)!important;font-size:18px!important;font-weight:400!important}
+.stg.hot{fill:var(--red-text)}
+.st text.wr{font-size:18px;font-weight:400;fill:var(--ink-2)}
+.st.cur text.wr{fill:var(--paper)}
+.fe{stroke:var(--line-2);stroke-width:2;fill:none;transition:stroke 200ms var(--ease)}
+.fe.cur{stroke:var(--ink);stroke-width:3}
+.wr{font-size:18px;fill:var(--ink-2)}
+.hot-bg{fill:var(--red)}
+
+/* S13 发布 */
+.ps{left:0;width:1112px;height:68px;display:grid;grid-template-columns:48px 48px 528px 488px;align-items:center}
+.ps .sq{width:24px;height:24px;border:2px solid var(--ink);background:var(--paper);transition:background 200ms var(--ease),border-color 200ms var(--ease)}
+.ps.lit .sq{background:var(--red);border-color:var(--red)}
+.ps .n{font-size:18px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.ps .t{font-size:24px;font-weight:700;white-space:nowrap}
+.ps .mono{font-size:18px;color:var(--ink-2);white-space:nowrap}
+.ps .t.mono,.ps .t .mono{color:var(--ink)}
+.pcard{border:2px solid var(--ink);background:var(--paper)}
+.pcard .hd{height:48px;line-height:46px;padding:0 24px;border-bottom:1px solid var(--line);font-size:18px;color:var(--ink-2)}
+.pcard .bd{padding:24px}
+.pcard .s2{display:none}
+.pcard.lit .s1{display:none}
+.pcard.lit .s2{display:block}
+.live{background:var(--red);color:var(--paper);padding:24px;font-size:30px;font-weight:700;line-height:1.2}
+
+/* S14 域名 */
+.nd rect{fill:var(--paper);stroke:var(--ink);stroke-width:2}
+.nd text{font-size:24px;font-weight:700;fill:var(--ink)}
+.nd text.sb{font-size:18px;font-weight:400;fill:var(--ink-2)}
+.nd.hub rect{fill:var(--red);stroke:var(--red)}
+.nd.hub text{fill:var(--paper)}
+.kq{width:24px;height:24px;border:2px solid var(--ink)}
+.kq.f{background:var(--ink)}
+.fr{width:544px;height:84px;border-top:1px solid var(--line);padding-top:12px}
+.fr .t{font-size:20px;font-weight:700;line-height:1.4}
+.fr .s{font-size:18px;color:var(--ink-2);line-height:1.5}
+
+/* S15 数据 */
+.fd{left:0;width:402px;height:96px;border-top:1px solid var(--line);padding-top:12px}
+.fd .mono{font-size:24px;font-weight:700;line-height:1.3}
+.fd .s{font-size:18px;color:var(--ink-2);line-height:1.5}
+.tl{font-size:20px;font-weight:700;fill:var(--ink)}
+.snapd{fill:var(--red)}
+
+/* S16 计费 */
+.acc{background:var(--line)}
+#bfill{position:absolute;left:0;top:0;bottom:0;width:100%;background:var(--ink);transform-origin:left;transform:scaleX(0)}
+#bfill.hot{background:var(--red)}
+.mk{width:2px;background:var(--red)}
+.rs{width:402px;border-top:8px solid var(--line-2);padding-top:16px;transition:border-color 300ms var(--ease)}
+.rs.lit{border-top-color:var(--ink)}
+.rs.red.lit{border-top-color:var(--red)}
+.rs .mono{font-size:24px;font-weight:700;line-height:1.3}
+.rs .c{font-size:20px;color:var(--ink-2);margin-top:4px}
+.rs .cs{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+#bptr{left:0;top:360px;width:16px;height:16px;background:var(--red);opacity:0}
+
+/* S17 */
+.mx{width:260px;height:112px;display:flex;flex-direction:column;justify-content:center;padding:0 24px;color:var(--paper)}
+.mx.ok{background:var(--ink)}
+.mx.no{background:var(--red)}
+.mx .t{font-size:24px;font-weight:700;line-height:1.3}
+.mx .s{font-size:18px;line-height:1.5}
+.mxh{font-family:var(--mono);font-size:20px;font-weight:700;white-space:nowrap}
+.sb4{width:186px;height:88px;border:2px solid var(--ink);padding:12px 16px;background:var(--paper)}
+.sb4 .n{font-size:18px;font-weight:700;color:var(--red-text)}
+.sb4 .t{font-size:24px;font-weight:700;line-height:1.3}
+
+/* S18 */
+.dt{left:0;width:1254px;height:72px;border-top:1px solid var(--line);display:grid;grid-template-columns:284px 426px 544px;align-items:center;font-size:20px}
+.dt>span{white-space:nowrap}
+.dt .k{font-weight:700}
+.dt .d{color:var(--ink-2)}
+.dt .c{font-weight:700}
+.dth{left:0;width:1254px;display:grid;grid-template-columns:284px 426px 544px;font-size:18px;color:var(--ink-2)}
+.lim li{padding:16px 0;border-top:1px solid var(--paper);font-size:20px;line-height:1.5}
+.lim li:first-child{border-top:0}
+.chip.mu{color:var(--ink-2);font-family:var(--sans);font-size:18px}
+
+#rotate{display:none;position:fixed;left:0;right:0;top:calc(50% + 540px * var(--s,1) + 24px);text-align:center;font:18px/1.5 var(--sans);color:var(--ink-2)}
+@media (orientation:portrait) and (max-width:700px){#rotate{display:block}}
+
+@media (prefers-reduced-motion:reduce){
+  .r,.sl,.m>span,.wx,.wy,.fade{transform:none!important;opacity:0;transition:opacity 200ms linear!important}
+  .r.on,.sl.on,.m.on>span,.wx.on,.wy.on,.fade.on{opacity:1}
+  .dl{stroke-dashoffset:0!important;opacity:0;transition:opacity 200ms linear!important}
+  .dl.on{opacity:1}
+  .gate{transition:none!important}
+  #pcar{transition:none!important}
+  .tok,.runner,#gtok,#bptr{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage" aria-roledescription="动画演示">
+  <header class="top"><span class="b">函数之海 · FuncSea 架构</span><span class="muted" id="sceneLabel">01 / 18</span></header>
+
+  <!-- 1 封面 -->
+  <section class="scene" data-dur="7000" data-end="3200" data-name="封面">
+    <div class="label r" data-at="200" style="left:0;top:0">架构调研 · 只读</div>
+    <div class="muted r" data-at="300" style="left:852px;top:0;font-size:18px">Atoms（MGX）· 基于 2026-10-21 工作树</div>
+    <h2 class="display" style="left:0;top:64px"><span class="m" data-at="400"><span>函数之海</span></span></h2>
+    <div class="n96 accent r" data-at="800" style="left:852px;top:120px">FuncSea</div>
+    <div class="sea-l r" data-at="1200" style="left:0;top:284px">01　产品开关</div>
+    <div class="sea wx" data-at="1200" style="left:0;top:320px;width:1680px"></div>
+    <div class="sea-c mono fade" data-at="1500" style="left:1136px;top:284px">chat.config.funcsea.enable</div>
+    <div class="sea-l r" data-at="1400" style="left:0;top:340px">02　项目形态</div>
+    <div class="sea wx" data-at="1400" style="left:0;top:376px;width:1680px"></div>
+    <div class="sea-c mono fade" data-at="1700" style="left:1136px;top:340px">function_sea 全栈模板</div>
+    <div class="sea-l r" data-at="1600" style="left:0;top:396px">03　基础设施</div>
+    <div class="sea wx" data-at="1600" style="left:0;top:432px;width:1680px"></div>
+    <div class="sea-c mono fade" data-at="1900" style="left:1136px;top:396px">infra · deploysvc · cost</div>
+    <p class="r" data-at="2000" style="left:0;top:496px;font-size:48px;font-weight:700;line-height:1.2">Atoms 的全栈后端模式</p>
+    <p class="muted r" data-at="2200" style="left:0;top:576px;font-size:30px;line-height:1.3">对用户叫 Atoms Cloud</p>
+    <div class="r" data-at="2400" style="left:0;top:648px;display:flex;gap:8px">
+      <span class="chip">backend</span><span class="chip">mgx-thinking</span><span class="chip">MetaGPT</span><span class="chip">nuxt-mgx</span><span class="chip">func-sea-infra</span><span class="chip">deploysvc</span><span class="chip">funcsea-cost</span>
+    </div>
+    <p class="fn r" data-at="2600"><span>出处</span><span class="mono">findings/lead-notes.md §2 · 路径缩写：BE backend · TH mgx_thinking · MG MetaGPT · TPL function_sea 模板 · FE nuxt-mgx · INFRA / DSVC / COST</span></p>
+  </section>
+
+  <!-- 2 三层含义 -->
+  <section class="scene" data-dur="7500" data-end="4600" data-name="三层含义">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>一个词，三层含义</span></span></h2>
+    <div class="band sl" data-at="600" style="top:112px">
+      <div><div class="n">01</div><div class="t">产品开关</div><div class="d">chat 级，Agent 写入</div></div>
+      <div><div class="code">chat.config.funcsea.enable</div><div class="sub">为真后，打版本、预览、发布、删除都走 FuncSea 分支</div></div>
+    </div>
+    <div class="band sl" data-at="1400" style="top:304px">
+      <div><div class="n">02</div><div class="t">项目形态</div><div class="d">function_sea 全栈模板</div></div>
+      <div><div class="row"><span class="chip">app/frontend</span><span class="muted">React + shadcn</span><span class="chip">app/backend</span><span class="muted">FastAPI</span><span class="chip">start_app_v2.sh</span></div><div class="sub">前端与后端同进一个 Lambda</div></div>
+    </div>
+    <div class="band sl" data-at="2200" style="top:496px">
+      <div><div class="n">03</div><div class="t">基础设施</div><div class="d">backend 编排 + 三个服务</div></div>
+      <div><div class="row"><span class="chip">func-sea-infra</span><span class="muted">Go · /api/v1/infra</span><span class="chip">deploysvc</span><span class="muted">构建</span><span class="chip">funcsea-cost</span><span class="muted">计费</span></div><div class="sub">Jenkins 构建镜像；infra 管 Lambda、Kong、Neon、R2、OIDC</div></div>
+    </div>
+    <p class="fn r" data-at="3400"><span>出处</span><span class="mono">BE/src/dao/orm/manager/chat.py:499 · MG/const.py:102-103 · BE/docs/func-sea-infra.md:16-22</span></p>
+  </section>
+
+  <!-- 3 解决什么 -->
+  <section class="scene" data-dur="8000" data-end="6000" data-name="解决什么">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>它解决什么：前端应用需要后端时</span></span></h2>
+    <div class="label r" data-at="500" style="left:0;top:112px">TL prompt 的默认选择</div>
+    <p class="r" data-at="600" style="left:0;top:152px;width:1254px;font-size:30px;line-height:1.5">需要 Auth、DB、存储、函数或 AI 时，默认用 Atoms Cloud</p>
+    <svg style="left:0;top:288px" width="852" height="416" viewBox="0 0 852 416">
+      <path class="ln dl" data-at="1300" pathLength="1" d="M260,164 C343,164 343,32 426,32"/>
+      <path class="ln dl" data-at="1550" pathLength="1" d="M260,164 C343,164 343,112 426,112"/>
+      <path class="ln dl" data-at="1800" pathLength="1" d="M260,164 C343,164 343,192 426,192"/>
+      <path class="ln dl" data-at="2050" pathLength="1" d="M260,164 C343,164 343,272 426,272"/>
+      <path class="ln dl" data-at="2300" pathLength="1" d="M260,164 C343,164 343,352 426,352"/>
+      <path class="ln red dl" data-at="3200" pathLength="1" d="M686,32 C769,32 769,192 852,192"/>
+      <path class="ln red dl" data-at="3300" pathLength="1" d="M686,112 C769,112 769,192 852,192"/>
+      <path class="ln red dl" data-at="3400" pathLength="1" d="M686,192 H852"/>
+      <path class="ln red dl" data-at="3500" pathLength="1" d="M686,272 C769,272 769,192 852,192"/>
+      <path class="ln red dl" data-at="3600" pathLength="1" d="M686,352 C769,352 769,192 852,192"/>
+    </svg>
+    <div class="box r" data-at="900" style="left:0;top:400px;width:260px;height:104px">
+      <div class="t sm">纯前端应用</div><div class="s">只有页面</div>
+    </div>
+    <div class="mod r" data-at="1300" data-lit="1700" style="left:426px;top:288px;width:260px"><i></i><span class="mono">database</span><span>数据库</span></div>
+    <div class="mod r" data-at="1550" data-lit="1950" style="left:426px;top:368px;width:260px"><i></i><span class="mono">auth</span><span>登录</span></div>
+    <div class="mod r" data-at="1800" data-lit="2200" style="left:426px;top:448px;width:260px"><i></i><span class="mono">aihub</span><span>AI</span></div>
+    <div class="mod r" data-at="2050" data-lit="2450" style="left:426px;top:528px;width:260px"><i></i><span class="mono">storage</span><span>存储</span></div>
+    <div class="mod r" data-at="2300" data-lit="2700" style="left:426px;top:608px;width:260px"><i></i><span class="mono">payment2</span><span>支付</span></div>
+    <div class="box hub r" data-at="3000" style="left:852px;top:400px;width:402px;height:160px">
+      <div class="t">一个 Lambda</div><div class="s">React 前端 + FastAPI 后端</div><div class="s">general 场景装 5 个模块</div>
+    </div>
+    <div class="r" data-at="4200" style="left:1278px;top:344px"><span class="tagr">二选一 · 硬互斥</span></div>
+    <div class="box dash r" data-at="4000" style="left:1278px;top:400px;width:402px;height:104px">
+      <div class="t sm muted">Supabase</div><div class="s">已连 Supabase 则不能开启</div>
+    </div>
+    <p class="fn r" data-at="5000"><span>出处</span><span class="mono">MG/prompts/di/team_leader.py:46 · TPL/templates/general/manifest.json:5-7 · BE/src/common/util/funcsea_supabase_mutex.py:24</span></p>
+  </section>
+
+  <!-- 4 生命周期 -->
+  <section class="scene" data-dur="9000" data-end="7200" data-name="生命周期" data-hook="life">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>在生命周期里：两个接管点</span></span></h2>
+    <p class="muted r" data-at="400" style="left:0;top:96px">开关落库后，其余阶段都按开关分支</p>
+    <div class="track hr wx" data-at="500" style="left:12px;top:279px;width:1562px"></div>
+    <div id="life" style="left:0;top:0;width:1680px;height:704px"></div>
+    <div class="runner" id="lrun" style="left:0;top:272px"></div>
+    <div class="ex r" data-at="1900" style="left:0;top:512px;width:828px">
+      <div class="t">接管点 1 · 激活</div>
+      <p>Agent 写入 <span class="mono">chat.config.funcsea.enable</span></p>
+      <div class="mono">BE/src/dao/orm/manager/chat.py:499</div>
+    </div>
+    <div class="ex r" data-at="3300" style="left:852px;top:512px;width:828px">
+      <div class="t">接管点 2 · 打版本</div>
+      <p>DEV 构建换成 Lambda 部署，thinking 最多等 600 秒</p>
+      <div class="mono">TH/chat.py:7825-7828</div>
+    </div>
+    <p class="muted r" data-at="6400" style="left:852px;top:672px;font-size:18px">PROD 只能由用户点 Publish 触发</p>
+    <p class="fn r" data-at="6800"><span>出处</span><span class="mono">TH/chat.py:7825-7828 · BE/src/dao/orm/manager/chat.py:499 · BE/src/service/deployment/deployment.py:240 · findings/A-lifecycle §0–1</span></p>
+  </section>
+
+  <!-- 5 谁打开开关 -->
+  <section class="scene" data-dur="8500" data-end="6800" data-name="谁打开开关">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>谁打开开关：Agent，不是用户</span></span></h2>
+    <div class="label r" data-at="400" style="left:0;top:104px">用户开关</div>
+    <div class="cb dash r" data-at="500" style="left:0;top:144px;width:402px"><div class="t">前端开关</div><div class="s mono" style="font-weight:400">enable_mgx_backend</div></div>
+    <div class="arrow mut wx" data-at="700" style="left:402px;top:187px;width:24px"></div>
+    <div class="cb dash r" data-at="600" style="left:426px;top:144px;width:402px"><div class="mono">enable_funcsea</div><div class="s">消息 metadata</div></div>
+    <div class="arrow mut wx" data-at="800" style="left:828px;top:187px;width:24px"></div>
+    <div class="cb dash r" data-at="700" style="left:852px;top:144px;width:402px"><div class="t">backend 落库</div><div class="s">HTTP metadata 路径仍保留</div></div>
+    <div class="strike wx" data-at="1300" style="left:0;top:186px;width:1254px"></div>
+    <div class="r" data-at="1500" style="left:1278px;top:144px;width:402px">
+      <div style="font-size:24px;font-weight:700;color:var(--red-text)">前端无触发源</div>
+      <div class="muted small">映射行已注释，入口函数无调用方</div>
+    </div>
+
+    <div class="label r" data-at="1900" style="left:0;top:296px">Agent</div>
+    <div class="cb r" data-at="2000" data-lit="2300" style="left:0;top:336px;width:236px"><div class="mono">TL / PM prompt</div><div class="s">默认后端为 Atoms Cloud</div></div>
+    <div class="arrow wx" data-at="2600" style="left:236px;top:395px;width:48px"></div>
+    <div class="cb r" data-at="2100" data-lit="2800" style="left:284px;top:336px;width:236px"><div class="mono">FrontendEngineer</div><div class="s">前端工程师角色</div></div>
+    <div class="arrow wx" data-at="3100" style="left:520px;top:395px;width:48px"></div>
+    <div class="cb r" data-at="2200" data-lit="3300" style="left:568px;top:336px;width:236px"><div class="mono">use_template</div><div class="mono">activate_backend</div><div class="s">新项目 / 已有前端</div></div>
+    <div class="arrow wx" data-at="3600" style="left:804px;top:395px;width:48px"></div>
+    <div class="cb r" data-at="2300" data-lit="3800" style="left:852px;top:336px;width:236px"><div class="mono">CanUseFuncsea</div><div class="s">gRPC，两道准入</div></div>
+    <div class="arrow wx" data-at="4100" style="left:1088px;top:395px;width:48px"></div>
+    <div class="cb r" data-at="2400" data-lit="4300" style="left:1136px;top:336px;width:236px"><div class="mono">UPDATE_CONFIG</div><div class="s">事件回传 backend</div></div>
+    <div class="arrow wx" data-at="4600" style="left:1372px;top:395px;width:48px"></div>
+    <div class="cb fin r" data-at="2500" data-lit="4800" style="left:1420px;top:336px;width:260px"><div class="mono" style="font-size:18px">chat.config.funcsea</div><div class="s">enable = true</div></div>
+    <div class="cref r" data-at="2600" style="left:0;top:472px">team_leader.py:46</div>
+    <div class="cref r" data-at="2700" style="left:568px;top:472px">frontend_engineer.py<br>:769,868</div>
+    <div class="cref r" data-at="2800" style="left:852px;top:472px">metagpt_inject.py<br>:1070-1077,1282-1287</div>
+    <div class="cref r" data-at="2900" style="left:1420px;top:472px">chat_task.py<br>:3682-3700</div>
+    <p class="r" data-at="5400" style="left:0;top:600px;width:1254px">开启方式只剩 Agent：新项目调 <span class="mono">use_template("backend")</span>，已有前端调 <span class="mono">activate_backend()</span>。</p>
+    <p class="fn two r" data-at="6000"><span>出处</span><span class="mono">MG/prompts/di/team_leader.py:46 · MG/roles/di/frontend_engineer.py:769,868 · TH/metagpt_inject.py:1063-1108,1282-1287</span><br><span class="mono cont">BE/src/service/chat/chat_task.py:3682-3700 · FE/feature-home/src/composables/use-message-send.ts:1548 · 裁定见 lead-notes §1 K1</span></p>
+  </section>
+
+  <!-- 6 准入四道闸 -->
+  <section class="scene" data-dur="8000" data-end="6000" data-name="准入四道闸" data-hook="gates">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>准入四道闸：依次放行</span></span></h2>
+    <div class="chan wx" data-at="400" style="left:0;top:299px;width:1278px"></div>
+    <div class="box r" data-at="500" style="left:0;top:252px;width:118px;height:96px;padding:12px"><div class="t sm">Agent</div><div class="s" style="margin:0">请求开启</div></div>
+    <div class="fade" data-at="500" style="left:284px;top:196px"><div class="gate" data-at="1400"></div></div>
+    <div class="fade" data-at="580" style="left:568px;top:196px"><div class="gate open"></div></div>
+    <div class="fade" data-at="660" style="left:852px;top:196px"><div class="gate" data-at="2900"></div></div>
+    <div class="fade" data-at="740" style="left:1136px;top:196px"><div class="gate" data-at="3800"></div></div>
+    <div id="gtok"></div>
+    <div class="redblock r" data-at="900" style="left:1278px;top:236px;width:402px;height:128px;padding:24px;justify-content:center">
+      <div style="font-size:24px;font-weight:700;line-height:1.3">写入开关</div><div class="mono small">chat.config.funcsea</div>
+    </div>
+    <div class="gt r" data-at="700" style="left:284px;top:432px;width:260px">
+      <div class="n">01</div><div class="t">Supabase 互斥</div><div class="mono">supabase_opened</div><p>已连 Supabase 即拒绝</p>
+    </div>
+    <div class="gt r" data-at="800" style="left:568px;top:432px;width:260px">
+      <div class="n">02</div><div class="t">套餐白名单<span class="chip">默认关闭</span></div><div class="mono">plan_limit</div><p><span class="mono" style="color:var(--ink-2)">enable_check_plan</span> 默认 false</p>
+    </div>
+    <div class="gt r" data-at="900" style="left:852px;top:432px;width:260px">
+      <div class="n">03</div><div class="t">免费次数</div><div class="mono">usage_limit_reached</div><p>默认 1 次，prod 覆盖为 2</p>
+    </div>
+    <div class="gt r" data-at="1000" style="left:1136px;top:432px;width:260px">
+      <div class="n">04</div><div class="t">镜像存储<span class="chip">上限 1024GB</span></div><div class="mono">image_storage_limit</div><p>infra 写死上限，很难触发</p>
+    </div>
+    <div class="pass fade" data-at="1400" style="left:284px;top:596px">放行</div>
+    <div class="pass fade" data-at="2300" style="left:568px;top:596px">默认不检查</div>
+    <div class="pass fade" data-at="2900" style="left:852px;top:596px">放行</div>
+    <div class="pass fade" data-at="3800" style="left:1136px;top:596px">放行</div>
+    <p class="r" data-at="5000" style="left:0;top:664px;width:1680px">任一道失败，Agent 收到 “Backend activation failed”，部分原因降级为纯前端继续。</p>
+    <p class="fn two r" data-at="5400"><span>出处</span><span class="mono">BE/src/service/chat/chat.py:5999-6070 · BE/src/conf/config.yaml:2788 · BE/src/conf/config-env-overrides.yaml:2651-2654</span><br><span class="mono cont">INFRA/internal/services/image.go:674-675 · MG/roles/di/frontend_engineer.py:936-950</span></p>
+  </section>
+
+  <!-- 7 模板拼装 -->
+  <section class="scene" data-dur="8500" data-end="6600" data-name="模板拼装">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>模板拼装：base + 5 模块，配置另存两套</span></span></h2>
+    <div class="box r" data-at="400" style="left:0;top:152px;width:260px;height:96px;padding:12px 16px"><div class="t sm mono">base</div><div class="s" style="margin:0">frontend + backend</div></div>
+    <div class="mc sl" data-at="700" style="left:0;top:264px;width:260px">database</div>
+    <div class="mc sl" data-at="850" style="left:0;top:336px;width:260px">auth</div>
+    <div class="mc sl" data-at="1000" style="left:0;top:408px;width:260px">aihub</div>
+    <div class="mc sl" data-at="1150" style="left:0;top:480px;width:260px">storage</div>
+    <div class="mc sl" data-at="1300" style="left:0;top:552px;width:260px">payment2</div>
+    <div class="arrow wx" data-at="1600" style="left:260px;top:379px;width:166px"></div>
+    <div class="box hub r" data-at="1800" style="left:426px;top:264px;width:402px;height:232px">
+      <div class="t mono" style="font-size:24px">ProjectBuilder</div>
+      <ul class="pb" data-seq="2100,250" style="margin-top:8px">
+        <li class="r">安装模块</li>
+        <li class="r">注入 import / startup / routers</li>
+        <li class="r">生成 dev / prod 两套 env KV</li>
+      </ul>
+    </div>
+    <svg style="left:828px;top:112px" width="166" height="560" viewBox="0 0 166 560">
+      <path class="ln dl" data-at="2900" pathLength="1" d="M0,228 C83,228 83,116 160,116"/>
+      <path class="ln red dl" data-at="3600" pathLength="1" d="M0,308 C83,308 83,404 160,404"/>
+      <polygon class="ahd fade" data-at="3400" points="154,109 166,116 154,123"/>
+      <polygon class="ahd fade" data-at="4100" points="154,397 166,404 154,411" style="fill:var(--red)"/>
+    </svg>
+    <div class="box r" data-at="3100" style="left:994px;top:112px;width:402px;height:232px;padding:16px 24px">
+      <div class="mono b" style="font-size:20px">app/backend/main.py</div>
+      <div style="margin-top:12px">
+        <div class="slot"><span>import</span><span># MODULE_*_END <b class="fade" data-at="3400">+5</b></span></div>
+        <div class="slot"><span>startup</span><span># MODULE_*_END <b class="fade" data-at="3500">+5</b></span></div>
+        <div class="slot"><span>routers</span><span># MODULE_*_END <b class="fade" data-at="3600">+5</b></span></div>
+      </div>
+      <div class="accent b small" style="margin-top:12px">代码文件不含密钥</div>
+    </div>
+    <div class="box r" data-at="3800" style="left:994px;top:376px;width:402px;height:296px;padding:16px">
+      <div class="mono b" style="font-size:20px">env KV</div>
+      <div class="kvt" style="margin-top:8px">
+        <span class="h">键</span><span class="h mono">dev</span><span class="h mono">prod</span>
+        <span class="mono">database_url</span><span>有值</span><span class="accent b">置空</span>
+        <span>模块密钥、地址</span><span>dev 一套</span><span>prod 一套</span>
+      </div>
+      <div class="mono muted small" style="margin-top:16px;line-height:1.5">POST /chats/{id}/kvs/app<br>→ backend app_config_kvs</div>
+    </div>
+    <div class="label r" data-at="4600" style="left:1420px;top:112px">SDK 初始化</div>
+    <ul class="sdk" data-seq="4800,200" style="left:1420px;top:160px;width:260px">
+      <li class="r">OIDC client</li>
+      <li class="r">数据库 URL</li>
+      <li class="r">OSS 访问凭据</li>
+    </ul>
+    <p class="fn r" data-at="5800"><span>出处</span><span class="mono">MG/utils/project_builder.py:295-361,710-755,757-790 · MG/tools/libs/search_function_sea.py:59-64 · TPL/templates/general/manifest.json:5-7</span></p>
+  </section>
+
+  <!-- 8 工具箱 -->
+  <section class="scene" data-dur="7500" data-end="5600" data-name="后端工具箱">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>Agent 的后端工具箱</span></span></h2>
+    <div class="th r" data-at="400" style="top:112px"><span>方法</span><span>作用</span><span>目标</span></div>
+    <div class="tr r" data-at="600" style="top:152px"><span class="nm">create_tables</span><span class="ds">生成 ORM + alembic 迁移</span><span><span class="tgt fade" data-at="900">Neon</span></span></div>
+    <div class="tr r" data-at="950" style="top:216px"><span class="nm">get_schemas</span><span class="ds">读取表结构</span><span><span class="tgt fade" data-at="1250">Neon</span></span></div>
+    <div class="tr r" data-at="1300" style="top:280px"><span class="nm">insert_table_data</span><span class="ds">写入数据</span><span><span class="tgt fade" data-at="1600">Neon</span></span></div>
+    <div class="tr r" data-at="1650" style="top:344px"><span class="nm">create_bucket</span><span class="ds">建存储桶</span><span><span class="tgt fade" data-at="1950">R2</span></span></div>
+    <div class="tr r" data-at="2000" style="top:408px"><span class="nm">upload_objects</span><span class="ds">上传对象</span><span><span class="tgt fade" data-at="2300">R2</span></span></div>
+    <div class="tr r" data-at="2350" style="top:472px"><span class="nm">list_objects</span><span class="ds">列出对象</span><span><span class="tgt fade" data-at="2650">R2</span></span></div>
+    <div class="tr gr r" data-at="2900" style="top:536px"><span class="nm">create_function</span><span class="ds">只返回增量开发指引</span><span><span class="tgt dash fade" data-at="3200">无</span></span></div>
+    <div class="tr gr r" data-at="3250" style="top:600px;border-bottom:1px solid var(--line)"><span class="nm">get_functions</span><span class="ds">函数体为 pass，固定返回 None</span><span><span class="tgt dash fade" data-at="3550">无</span></span></div>
+    <div class="big r" data-at="3900" style="left:1278px;top:144px"><span class="cnt" data-to="8" data-c0="3900" data-cd="600">0</span></div>
+    <div class="label r" data-at="4000" style="left:1278px;top:288px">个方法</div>
+    <p class="muted r" data-at="4200" style="left:1278px;top:336px;width:402px">在 import 期一次注册，工具表不随轮次变化，保住 prompt 缓存命中。</p>
+    <p class="fn r" data-at="4800"><span>出处</span><span class="mono">MG/tools/libs/be/funcsea_manager.py:114-401 · MG/tools/libs/be/backend_manager.py:27-39</span></p>
+  </section>
+
+  <!-- 9 一个 Lambda -->
+  <section class="scene" data-dur="9000" data-end="7600" data-name="Lambda 分流" data-hook="route">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>一个 Lambda，前后端同住</span></span></h2>
+    <svg style="left:0;top:112px" width="852" height="528" viewBox="0 0 852 528" id="rsvg">
+      <path class="ln dl" id="rp0" data-at="1300" pathLength="1" d="M196,244 H544 C698,244 698,36 852,36"/>
+      <path class="ln dl" id="rp1" data-at="2200" pathLength="1" d="M196,244 H544 C698,244 698,124 852,124"/>
+      <path class="ln dl" id="rp2" data-at="3100" pathLength="1" d="M196,244 H544 C698,244 698,212 852,212"/>
+      <path class="ln dl" id="rp3" data-at="4000" pathLength="1" d="M196,244 H544 C698,244 698,300 852,300"/>
+      <path class="ln dl" id="rp4" data-at="4900" pathLength="1" d="M196,244 H544 C698,244 698,388 852,388"/>
+      <path class="ln dl" id="rp5" data-at="5800" pathLength="1" d="M196,244 H544 C698,244 698,476 852,476"/>
+      <rect class="tok" id="rtok" x="-8" y="-8" width="16" height="16" opacity="0"/>
+    </svg>
+    <div class="box r" data-at="400" style="left:0;top:316px;width:196px;height:80px;padding:12px 16px"><div class="t sm">HTTP 请求</div></div>
+    <div class="box hub r" data-at="700" style="left:284px;top:256px;width:260px;height:200px">
+      <div class="t mono" style="font-size:24px">lambda_handler</div><div class="s">在函数内替代 Nginx</div><div class="s">按路径分流</div>
+    </div>
+    <div class="rt r" data-at="900" data-lit="2100" style="top:112px"><span class="pth">/api/config</span><span class="dst">返回前端用的 API_BASE_URL</span></div>
+    <div class="rt r" data-at="980" data-lit="3000" style="top:200px"><span class="pth">/api/v1/*</span><span class="dst">Mangum → FastAPI</span></div>
+    <div class="rt r" data-at="1060" data-lit="3900" style="top:288px"><span class="pth">/health</span><span class="dst">直接返回 200</span></div>
+    <div class="rt r" data-at="1140" data-lit="4800" style="top:376px"><span class="pth">/database*</span><span class="dst">返回 404</span></div>
+    <div class="rt r" data-at="1220" data-lit="5700" style="top:464px"><span class="pth" style="font-family:var(--sans)">静态资源</span><span class="dst">读 <span class="mono">/var/task/frontend/dist</span></span></div>
+    <div class="rt r" data-at="1300" data-lit="6600" style="top:552px"><span class="pth" style="font-family:var(--sans)">其余路径</span><span class="dst">SPA，返回 index.html</span></div>
+    <ul class="facts" data-seq="6700,150" style="left:0;top:496px;width:520px">
+      <li class="r">Mangum <span class="mono">lifespan="off"</span>，首个请求懒加载模块</li>
+      <li class="r">基础镜像 python 3.13 · WORKDIR /var/task</li>
+      <li class="r">模板 Timeout 30s · Memory 512MB（生产值未确认）</li>
+    </ul>
+    <p class="fn r" data-at="7100"><span>出处</span><span class="mono">TPL/templates/base/backend/lambda_handler.py:150-182,236-284 · TPL/Dockerfile.mgx_aws_lambda_python_base:1,23 · INFRA/config/config.yaml:35-37</span></p>
+  </section>
+
+  <!-- 10 占位符 -->
+  <section class="scene" data-dur="9000" data-end="7400" data-name="占位符" data-hook="ph">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>占位符：三个阶段，三个替换者</span></span></h2>
+    <div class="pc r" data-at="400" data-lit="800" style="left:0;top:104px"><div class="n">01</div><div class="t">生成</div><div class="who">ProjectBuilder</div></div>
+    <div class="pc r" data-at="480" data-lit="2400" style="left:426px;top:104px"><div class="n">02</div><div class="t">沙箱预览</div><div class="who">start_app_v2.sh</div></div>
+    <div class="pc r" data-at="560" data-lit="4000" style="left:852px;top:104px"><div class="n">03</div><div class="t">DEV Lambda</div><div class="who">未确认</div></div>
+    <div class="pc r" data-at="640" data-lit="5600" style="left:1278px;top:104px"><div class="n">04</div><div class="t">PROD Lambda</div><div class="who">sync_app_config_to_infra</div></div>
+    <div id="pcar"></div>
+    <div class="ptag r" data-at="1000" style="left:0;top:312px;width:402px">$$BACKEND_DOMAIN$$</div>
+    <div class="ptag r" data-at="2600" style="left:426px;top:312px;width:402px">&lt;sandbox_host&gt;</div>
+    <div class="ptag q r" data-at="4200" style="left:852px;top:312px;width:402px"><span>$$BACKEND_DOMAIN$$</span><b>?</b></div>
+    <div class="ptag r" data-at="5800" style="left:1278px;top:312px;width:402px;border-color:var(--red);color:var(--red-text)">&lt;sub&gt;.&lt;prod_suffix&gt;</div>
+    <p class="pc-x r" data-at="1300" style="left:0;top:416px;width:402px">其余占位符在生成期替换；域名类原样写进 env KV</p>
+    <p class="pc-x r" data-at="2900" style="left:426px;top:416px;width:402px">启动脚本把域名占位符换成沙箱 host</p>
+    <p class="pc-x r" data-at="4500" style="left:852px;top:416px;width:402px">jenkins-scripts 不在本机；文档对 Jenkins 是否替换说法相反</p>
+    <p class="pc-x r" data-at="6100" style="left:1278px;top:416px;width:402px">发布前换成正式域名，再推给 Lambda env</p>
+    <p class="r" data-at="6600" style="left:0;top:600px;width:1680px">DEV 只在用户改 App Config 或 overview 回写时，由 backend 补替换。</p>
+    <p class="fn two r" data-at="7000"><span>出处</span><span class="mono">MG/utils/project_builder.py:193-239 · TPL/modules/auth/backend/manifest.json:11-19 · TPL/templates/base/start_app_v2.sh:627-638</span><br><span class="mono cont">BE/src/service/chat/chat.py:6431-6441 · verify K6</span></p>
+  </section>
+
+  <!-- 11 端到端 -->
+  <section class="scene" data-dur="9000" data-end="7400" data-name="端到端部署" data-hook="seq">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>端到端：一次打版本的 DEV 部署</span></span></h2>
+    <div class="r" data-at="600" style="left:1278px;top:0;width:402px">
+      <div class="small"><span class="b">thinking 等待回调</span><span class="muted">　最多 600 秒</span></div>
+      <div id="qbar" style="position:relative;height:8px;margin-top:8px;overflow:hidden"><div id="qfill"></div></div>
+    </div>
+    <div id="seq" style="left:0;top:96px;width:1254px;height:608px"></div>
+    <div class="label r" data-at="500" style="left:1278px;top:104px">出处</div>
+    <div id="sleg" style="left:1278px;top:96px;width:402px;height:608px"></div>
+    <p class="fn r" data-at="6900"><span>出处</span><span class="mono">各步见右栏 · TH/chat.py:6402-6461,6518 · DSVC/services/proxy.py:823-824 · BE/src/service/chat/chat_task.py:2627</span></p>
+  </section>
+
+  <!-- 12 状态机 -->
+  <section class="scene" data-dur="9000" data-end="7600" data-name="状态机" data-hook="fsm">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>状态机：task_status 几乎全由外部写入</span></span></h2>
+    <svg class="r" data-at="400" id="fsm" style="left:0;top:96px" width="1112" height="608" viewBox="0 0 1112 608">
+      <defs><marker id="ah12" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#171717"/></marker></defs>
+      <path class="fe" id="e-ib" d="M180,276 H298" marker-end="url(#ah12)"/>
+      <path class="fe" id="e-bs" d="M720,240 C790,240 790,136 858,136" marker-end="url(#ah12)"/>
+      <path class="fe" id="e-bf" d="M720,320 C790,320 790,472 858,472" marker-end="url(#ah12)"/>
+      <path class="ln red dash fade" data-at="6000" d="M970,96 V40 H510 V202"/>
+      <text class="el" x="196" y="262">首次返回</text>
+      <text class="el" x="734" y="290">改写为 SUCCESS</text>
+      <text class="el" x="728" y="520">*_failed / 超时</text>
+      <text class="el fade" data-at="6200" x="524" y="28" style="fill:#c70b16;font-weight:700">晚到回调可覆盖回非终态 · 无单调保护（推断）</text>
+      <g class="st" id="z-init"><rect x="0" y="236" width="180" height="80"/><text x="24" y="276" dominant-baseline="central">INIT</text></g>
+      <g class="st" id="z-bld"><rect x="300" y="204" width="420" height="144"/><text x="324" y="244" dominant-baseline="central">BUILDING</text>
+        <text class="wr" x="324" y="282" dominant-baseline="central" style="font-weight:400" id="stgl">阶段名写入 task_result</text>
+        <text class="stg" x="324" y="318" dominant-baseline="central" id="stg">load_app_env_success</text></g>
+      <g class="st end" id="z-suc"><rect x="860" y="96" width="220" height="80"/><text x="884" y="136" dominant-baseline="central">SUCCESS</text></g>
+      <g class="st" id="z-fail"><rect x="860" y="432" width="220" height="80"/><text x="884" y="472" dominant-baseline="central">FAILURE</text></g>
+      <text class="wr" x="0" y="348">backend 写</text>
+      <text class="wr" x="300" y="380">回调按键覆盖，不比较新旧</text>
+      <text class="wr" x="860" y="204">回调覆盖</text>
+      <text class="wr" x="860" y="548">回调，或超时补判</text>
+      <rect class="tok" id="ftok" x="-8" y="-8" width="16" height="16" opacity="0"/>
+      <text x="0" y="596" style="font-size:20px;fill:#171717">backend 只写 INIT · REDEPLOY · 超时 FAILURE；其余值来自 deploysvc / Jenkins 回调</text>
+    </svg>
+    <div class="r" data-at="600" style="left:1136px;top:112px;width:260px"><div class="n72"><span class="cnt" data-to="14" data-c0="600" data-cd="800">0</span></div><div class="muted">个枚举值</div></div>
+    <div class="r" data-at="700" style="left:1420px;top:112px;width:260px"><div class="n72 accent"><span class="cnt" data-to="8" data-c0="700" data-cd="800">0</span></div><div class="muted">个终态</div></div>
+    <div class="wx hr1" data-at="1000" style="left:1136px;top:264px;width:544px"></div>
+    <svg class="fade" data-at="6600" style="left:1136px;top:292px" width="48" height="48" viewBox="0 0 48 48">
+      <circle cx="24" cy="24" r="21" fill="none" stroke="#171717" stroke-width="2"/>
+      <line id="chand" x1="24" y1="24" x2="24" y2="8" stroke="#df1623" stroke-width="3"/>
+    </svg>
+    <div class="label fade" data-at="6600" style="left:1200px;top:296px;font-size:24px">超时：读时补判</div>
+    <p class="muted r" data-at="6800" style="left:1136px;top:360px;width:544px">前端拉 uris 时，最新 PROD 行停在非终态超过 10 分钟，就补一条 FAILURE / timeout 回调。</p>
+    <p class="r" data-at="7000" style="left:1136px;top:488px;width:544px">DEV 行没有超时落库，只靠 thinking 等 600 秒。</p>
+    <p class="muted small r" data-at="7100" style="left:1136px;top:568px;width:544px"><span class="mono">IN_REDIS_QUEUE</span> 不在 backend 枚举，推断按非终态处理。</p>
+    <p class="fn two r" data-at="7200"><span>出处</span><span class="mono">BE/src/common/enum/funcsea_deploy.py:4-38 · DSVC/services/proxy.py:823-824 · BE/src/dao/orm/manager/funcsea_deploy.py:189-201</span><br><span class="mono cont">BE/src/service/funcsea_deploy/funcsea_deploy.py:1437-1479 · BE/src/common/constants.py:974 · DSVC/schemas/proxy.py:9-31</span></p>
+  </section>
+
+  <!-- 13 Publish -->
+  <section class="scene" data-dur="9000" data-end="7200" data-name="Publish">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>Publish：从按钮到线上 URL</span></span></h2>
+    <div class="fade" data-at="500" style="left:11px;top:124px;width:2px;height:476px;background:var(--line-2)"></div>
+    <div class="wy" data-at="700" style="left:11px;top:124px;width:2px;height:476px;background:var(--red);transition:transform 4550ms linear"></div>
+    <div class="ps r" data-at="500" data-lit="700" style="top:112px"><i class="sq"></i><span class="n">01</span><span class="t mono" style="font-size:20px">PUT /v1/chats/{id}/deployment</span><span class="mono">BE/…/router/chat/__init__.py:334-337</span></div>
+    <div class="ps r" data-at="580" data-lit="1350" style="top:180px"><i class="sq"></i><span class="n">02</span><span class="t">余额守卫</span><span class="mono">BE/…/funcsea_deploy.py:120-137</span></div>
+    <div class="ps r" data-at="660" data-lit="2000" style="top:248px"><i class="sq"></i><span class="n">03</span><span class="t">PROD 锁 600 秒</span><span class="mono">funcsea_deploy.py:347-348</span></div>
+    <div class="ps r" data-at="740" data-lit="2650" style="top:316px"><i class="sq"></i><span class="n">04</span><span class="t">预留子域名 <span class="mono" style="font-size:20px">reserve_subdomain</span></span><span class="mono">funcsea_deploy.py:706</span></div>
+    <div class="ps r" data-at="820" data-lit="3300" style="top:384px"><i class="sq"></i><span class="n">05</span><span class="t mono" style="font-size:20px">sync_app_config_to_infra</span><span class="mono">funcsea_deploy.py:978</span></div>
+    <div class="ps r" data-at="900" data-lit="3950" style="top:452px"><i class="sq"></i><span class="n">06</span><span class="t">deploysvc / Jenkins，额度不足 402</span><span class="mono">INFRA/…/cloud_func.go:65-74</span></div>
+    <div class="ps r" data-at="980" data-lit="4600" style="top:520px"><i class="sq"></i><span class="n">07</span><span class="t">回调写 published，后台迁域名</span><span class="mono">funcsea_deploy.py:2408,2449</span></div>
+    <div class="ps r" data-at="1060" data-lit="5250" style="top:588px"><i class="sq"></i><span class="n">08</span><span class="t">推送 ws <span class="mono" style="font-size:20px">chat:deploy</span></span><span class="mono">funcsea_deploy.py:2460</span></div>
+    <div class="pcard r" data-at="1200" data-lit="5600" style="left:1278px;top:112px;width:402px;height:320px">
+      <div class="hd">发布面板</div>
+      <div class="bd">
+        <div class="n48 s1 muted">PENDING</div><div class="n48 s2">SUCCESS</div>
+        <p class="muted small" style="margin-top:16px">每 2 秒同步一次，并听 ws chat:deploy</p>
+        <div class="live fade" data-at="6000" style="margin-top:24px">Your link is live!<div class="mono" style="font-size:18px;font-weight:400;margin-top:8px">&lt;sub&gt;.&lt;prod_suffix&gt;</div></div>
+      </div>
+    </div>
+    <p class="r" data-at="6300" style="left:1278px;top:464px;width:402px"><span class="mono">is_always_latest</span> 在 FuncSea 下强制 False</p>
+    <p class="muted small r" data-at="6400" style="left:1278px;top:552px;width:402px">回调里的自动发布分支保留，但触发不到</p>
+    <p class="fn r" data-at="6800"><span>出处</span><span class="mono">BE/src/service/funcsea_deploy/funcsea_deploy.py · FE/domain-types/src/publish.ts:37 · BE/src/service/deployment/deployment.py:236-240</span></p>
+  </section>
+
+  <!-- 14 网关与域名 -->
+  <section class="scene" data-dur="8500" data-end="6800" data-name="网关与域名">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>网关与域名：一个应用，多路挂载</span></span></h2>
+    <svg style="left:0;top:96px" width="1112" height="608" viewBox="0 0 1112 608">
+      <path class="ln dl" data-at="1200" pathLength="1" d="M556,300 L170,84"/>
+      <path class="ln dl" data-at="1900" pathLength="1" d="M556,300 L942,84"/>
+      <path class="ln dl" data-at="2600" pathLength="1" d="M556,300 L942,524"/>
+      <path class="ln dl" data-at="3300" pathLength="1" d="M556,300 L170,524"/>
+      <rect class="fade" data-at="1500" x="357" y="186" width="12" height="12" fill="#171717"/>
+      <rect class="fade" data-at="2200" x="743" y="186" width="12" height="12" fill="#171717"/>
+      <rect class="fade" data-at="2900" x="743" y="406" width="12" height="12" fill="#171717"/>
+      <rect class="fade" data-at="3600" x="357" y="406" width="12" height="12" fill="#171717"/>
+      <g class="nd hub r" data-at="500"><rect x="416" y="252" width="280" height="96"/><text x="440" y="286" dominant-baseline="central" style="font-family:var(--mono);font-size:20px">…-app-{chat}-prod</text><text class="sb" x="440" y="320" dominant-baseline="central" style="fill:#fafafa">唯一的 PROD 函数</text></g>
+      <g class="nd fade" data-at="1500"><rect x="20" y="40" width="300" height="88"/><text x="40" y="70" dominant-baseline="central">内部域名</text><text class="sb" x="40" y="102" dominant-baseline="central" style="font-family:var(--mono)">&lt;sub&gt;.&lt;prod_suffix&gt;</text></g>
+      <g class="nd fade" data-at="2200"><rect x="792" y="40" width="300" height="88"/><text x="812" y="70" dominant-baseline="central">atoms.dev 镜像</text><text class="sb" x="812" y="102" dominant-baseline="central">主域名再发一份</text></g>
+      <g class="nd fade" data-at="2900"><rect x="792" y="480" width="300" height="88"/><text x="812" y="510" dominant-baseline="central">atoms.world 镜像</text><text class="sb" x="812" y="542" dominant-baseline="central">按开关再发一份</text></g>
+      <g class="nd fade" data-at="3600"><rect x="20" y="480" width="300" height="88"/><text x="40" y="510" dominant-baseline="central">自定义域名</text><text class="sb" x="40" y="542" dominant-baseline="central">经 appgateway，只绑 prod</text></g>
+      <text class="el fade" data-at="1700" x="20" y="160" style="fill:#c70b16;font-weight:700">+ OIDC 回调地址</text>
+      <text class="el fade" data-at="2400" x="1092" y="160" text-anchor="end" style="fill:#c70b16;font-weight:700">+ OIDC 回调地址</text>
+      <text class="el fade" data-at="3100" x="1092" y="466" text-anchor="end" style="fill:#c70b16;font-weight:700">+ OIDC 回调地址</text>
+      <text class="el fade" data-at="3800" x="20" y="466" style="fill:#c70b16;font-weight:700">+ OIDC 回调地址</text>
+      <rect class="fade" data-at="4000" x="416" y="404" width="12" height="12" fill="#171717"/>
+      <text class="el fade" data-at="4000" x="440" y="415">Kong Route，每个 host 一条</text>
+    </svg>
+    <div class="label r" data-at="4200" style="left:1136px;top:112px">Kong：shared / prod 双集群</div>
+    <div class="mono muted small r" data-at="4300" style="left:1352px;top:160px">shared</div>
+    <div class="mono muted small r" data-at="4300" style="left:1496px;top:160px">prod</div>
+    <div class="mono r" data-at="4400" style="left:1136px;top:200px">dev host</div>
+    <div class="kq f r" data-at="4500" style="left:1352px;top:204px"></div>
+    <div class="kq r" data-at="4500" style="left:1496px;top:204px;border-color:var(--line-2)"></div>
+    <div class="mono r" data-at="4600" style="left:1136px;top:248px">prod host</div>
+    <div class="kq f r" data-at="4700" style="left:1352px;top:252px"></div>
+    <div class="kq f r" data-at="4700" style="left:1496px;top:252px"></div>
+    <div class="fr r" data-at="5000" style="left:1136px;top:320px"><div class="t">每个 host 一条 Service + Route</div><div class="s">30 QPS 限流</div></div>
+    <div class="fr r" data-at="5200" style="left:1136px;top:404px"><div class="t">迁移中：通配 Route + 插件</div><div class="s">插件源码不在本机</div></div>
+    <div class="fr r" data-at="5400" style="left:1136px;top:488px"><div class="t">自定义域名只绑 prod</div><div class="s">域名冲突返回 409</div></div>
+    <div class="fr r" data-at="5600" style="left:1136px;top:572px"><div class="t">OIDC 白名单随每次挂载追加</div><div class="s">内部域名与平行域名都写入</div></div>
+    <p class="fn two r" data-at="6000"><span>出处</span><span class="mono">INFRA/internal/services/domain.go:652-717,866-882 · INFRA/internal/logic/kong_router.go:20-95 · INFRA/internal/logic/route_publisher_mode.go:14-48</span><br><span class="mono cont">INFRA/config/config.yaml:121 · BE/src/service/funcsea_deploy/funcsea_deploy.py:3654-3710 · verify K5</span></p>
+  </section>
+
+  <!-- 15 数据 -->
+  <section class="scene" data-dur="8500" data-end="6600" data-name="数据">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>数据：配置、Neon、R2</span></span></h2>
+    <div class="label mono r" data-at="400" style="left:0;top:112px">chat.config.funcsea</div>
+    <div class="fd r" data-at="600" style="top:160px"><div class="mono">enable</div><div class="s">开关，Agent 经 UPDATE_CONFIG 写入</div></div>
+    <div class="fd r" data-at="700" style="top:256px"><div class="mono">ui_style</div><div class="s">前端模板风格</div></div>
+    <div class="fd r" data-at="800" style="top:352px"><div class="mono">use_database</div><div class="s">前端据此显示 DB 面板</div></div>
+    <div class="fd r" data-at="900" style="top:448px"><div class="mono">published</div><div class="s">PROD 成功写 true，下线写 false</div></div>
+    <div class="fd r" data-at="1000" style="top:544px;border-bottom:1px solid var(--line)"><div class="mono">unpublished_at</div><div class="s">下线时间</div></div>
+    <div class="label r" data-at="1400" style="left:426px;top:112px">Neon：一个 app 一个 project</div>
+    <svg style="left:426px;top:160px" width="686" height="480" viewBox="0 0 686 480">
+      <path class="ln dl" data-at="1800" pathLength="1" d="M140,216 H660"/>
+      <path class="ln red dl" data-at="2600" pathLength="1" d="M200,216 C200,136 236,96 300,96 H660"/>
+      <path class="ln dash fade" data-at="4000" d="M420,216 C420,300 456,336 520,336 H660"/>
+      <g class="nd r" data-at="1600"><rect x="0" y="180" width="140" height="72"/><text x="20" y="216" dominant-baseline="central">project</text></g>
+      <text class="tl fade" data-at="2200" x="440" y="200">默认分支 → DEV</text>
+      <text class="tl fade" data-at="2900" x="440" y="80" style="fill:#c70b16">fork 分支 → PROD</text>
+      <circle class="snapd fade" data-at="3200" cx="300" cy="216" r="10"/>
+      <circle class="snapd fade" data-at="3400" cx="420" cy="216" r="10"/>
+      <circle class="snapd fade" data-at="3600" cx="540" cy="216" r="10"/>
+      <text class="el fade" data-at="3600" x="160" y="284">每次打版本建一个 DB 快照</text>
+      <text class="el fade" data-at="4200" x="440" y="376">preview 分支 · 10 分钟过期</text>
+    </svg>
+    <div class="label r" data-at="4800" style="left:1136px;top:112px">R2 对象存储</div>
+    <div class="mono b r" data-at="4900" style="left:1136px;top:160px;font-size:30px;line-height:1.3"><span class="fade" data-at="5000">{uid}/</span><span class="fade" data-at="5150">{app}/</span><span class="fade" data-at="5300">{bucket}/</span></div>
+    <div class="muted small fade" data-at="5000" style="left:1136px;top:208px">用户</div>
+    <div class="muted small fade" data-at="5150" style="left:1244px;top:208px">应用</div>
+    <div class="muted small fade" data-at="5300" style="left:1352px;top:208px">桶</div>
+    <p class="r" data-at="5500" style="left:1136px;top:272px;width:544px">Agent 建的桶是这条路径下的虚拟目录。</p>
+    <div class="r" data-at="5700" style="left:1136px;top:336px"><span class="tagr">不分 env</span></div>
+    <p class="fn r" data-at="6000"><span>出处</span><span class="mono">findings/E §2,§4–5 · INFRA/…/pgsql.go:944-993 · BE/src/service/snapshot/snapshot.py:674 · INFRA/…/snapshot.go:307-330 · INFRA/…/oss.go:76-160</span></p>
+  </section>
+
+  <!-- 16 计费 -->
+  <section class="scene" data-dur="9000" data-end="7400" data-name="计费与欠费" data-hook="bill">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>计费：满 1 积分扣一次，余额决定状态</span></span></h2>
+    <div class="label r" data-at="400" style="left:0;top:112px">累积扣费 <span class="muted" style="font-weight:400">资源成本 × 1.5（本地配置）</span></div>
+    <div class="small b r" data-at="500" style="left:852px;top:116px;width:260px;text-align:right;color:var(--red-text)">1 积分 = $0.000002</div>
+    <div class="acc r" data-at="600" style="left:0;top:168px;width:1112px;height:48px;overflow:hidden"><div id="bfill"></div></div>
+    <div class="mk fade" data-at="700" style="left:1110px;top:152px;height:80px"></div>
+    <p class="r" data-at="800" style="left:0;top:232px">满 1 积分扣一次，余数继续累积　<span class="muted">1 USD = 50 万积分</span></p>
+    <svg style="left:1112px;top:112px" width="166" height="160" viewBox="0 0 166 160">
+      <path class="ln dl" data-at="3900" pathLength="1" d="M0,80 C83,80 83,40 166,40"/>
+      <path class="ln dl" data-at="4000" pathLength="1" d="M0,80 C83,80 83,128 166,128"/>
+    </svg>
+    <div class="box r" data-at="4100" style="left:1278px;top:112px;width:402px;height:80px;padding:8px 24px"><div class="t sm mono">wallet</div><div class="s" style="margin:0">AB wallet_v1 = enabled，infra 自算状态</div></div>
+    <div class="box r" data-at="4200" style="left:1278px;top:200px;width:402px;height:80px;padding:8px 24px"><div class="t sm mono">oneapi</div><div class="s" style="margin:0">oneapi 组，由 oneapi 推送状态</div></div>
+    <div class="label r" data-at="4300" style="left:0;top:320px">余额状态</div>
+    <div id="bptr"></div>
+    <div class="rs r" data-at="4300" data-lit="4400" style="left:0;top:384px"><div class="mono">normal</div><div class="c">≥ 50 万积分</div><div class="cs"><span class="chip mu">正常运行</span></div></div>
+    <div class="rs red r" data-at="4350" data-lit="5010" style="left:426px;top:384px"><div class="mono">restricted</div><div class="c">&lt; 50 万积分</div><div class="cs"><span class="chip mu">Neon 压到最小 CU</span></div></div>
+    <div class="rs red r" data-at="4400" data-lit="5630" style="left:852px;top:384px"><div class="mono">overdue</div><div class="c">≤ 0，dev 与 prod 都停</div><div class="cs"><span class="chip mu">Kong 停</span><span class="chip mu">Lambda 并发 0</span><span class="chip mu">Neon 禁用</span><span class="chip mu">OSS 标记</span></div></div>
+    <div class="rs red r" data-at="4450" data-lit="6240" style="left:1278px;top:384px"><div class="mono">删除</div><div class="c">欠费超过保留期</div><div class="cs"><span class="chip mu">free 3 天</span><span class="chip mu">pro 7 天</span><span class="chip mu">max 15 天</span></div></div>
+    <p class="muted r" data-at="6600" style="left:0;top:640px">只有 PROD 拦余额；前端识别 402 / 10402 / 5010。</p>
+    <p class="fn two r" data-at="6900"><span>出处</span><span class="mono">COST/config/config.yaml:10 · COST/internal/billing/redis_accumulator.go:14 · COST/…/models.go:65 · COST/…/service.go:186-194</span><br><span class="mono cont">INFRA/internal/services/status.go:156-168,233-265 · COST/internal/user/scanner.go:231-243 · FE/chat-publish/…/cloud-balance-insufficient.ts:15-24</span></p>
+  </section>
+
+  <!-- 17 恢复与删除 -->
+  <section class="scene" data-dur="8500" data-end="6800" data-name="恢复与删除">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>恢复与删除：形态判定与清理链</span></span></h2>
+    <div class="label r" data-at="400" style="left:0;top:112px">edit / retry：目标版本形态 × 当前开关</div>
+    <div class="mxh r" data-at="500" style="left:284px;top:160px">enable = true</div>
+    <div class="mxh r" data-at="550" style="left:568px;top:160px">enable = false</div>
+    <div class="mxh r" data-at="600" style="left:0;top:244px;font-size:18px">有 start_app_v2.sh</div>
+    <div class="mxh r" data-at="650" style="left:0;top:380px;font-size:18px">无 start_app_v2.sh</div>
+    <div class="mx ok r" data-at="1000" style="left:284px;top:208px"><div class="t">放行</div><div class="s">形态一致</div></div>
+    <div class="mx no r" data-at="1400" style="left:568px;top:208px"><div class="t">拒绝</div><div class="s">形态不相容</div></div>
+    <div class="mx no r" data-at="1600" style="left:284px;top:344px"><div class="t">拒绝</div><div class="s">形态不相容</div></div>
+    <div class="mx ok r" data-at="1200" style="left:568px;top:344px"><div class="t">放行</div><div class="s">形态一致</div></div>
+    <div class="box dash r" data-at="2000" style="left:284px;top:480px;width:544px;height:64px;padding:12px 24px"><div class="t sm">判不出 → 放行</div></div>
+    <p class="mono small r" data-at="2300" style="left:0;top:568px">拒绝时抛 T_EditRetryFuncseaShapeMismatch</p>
+    <p class="muted r" data-at="2400" style="left:0;top:608px;width:828px">快照恢复：workspace 没有 app/backend/ 时，把 enable 降级为 false</p>
+
+    <div class="label r" data-at="3000" style="left:852px;top:112px">删除 chat：顺序清理，单步失败不阻断</div>
+    <div class="cb r" data-at="3200" data-lit="3400" style="left:852px;top:160px;width:236px;height:88px"><div class="mono">unpublish</div><div class="s">下线 PROD</div></div>
+    <div class="arrow wx" data-at="3600" style="left:1088px;top:203px;width:48px"></div>
+    <div class="cb r" data-at="3300" data-lit="3800" style="left:1136px;top:160px;width:236px;height:88px"><div class="mono">undeploy</div><div class="s">删除部署记录</div></div>
+    <div class="arrow wx" data-at="4000" style="left:1372px;top:203px;width:48px"></div>
+    <div class="cb fin r" data-at="3400" data-lit="4200" style="left:1420px;top:160px;width:260px;height:88px"><div class="mono">infra 删除</div><div class="s">按顺序清资源</div></div>
+    <div class="wy vr" data-at="4400" style="left:1549px;top:248px;height:48px"></div>
+    <div class="wx hr" data-at="4500" style="left:944px;top:295px;width:607px"></div>
+    <div class="sb4 r" data-at="4600" style="left:852px;top:320px"><div class="n">01</div><div class="t">云函数</div></div>
+    <div class="sb4 r" data-at="4750" style="left:1062px;top:320px"><div class="n">02</div><div class="t">镜像</div></div>
+    <div class="sb4 r" data-at="4900" style="left:1272px;top:320px"><div class="n">03</div><div class="t">Neon</div></div>
+    <div class="sb4 r" data-at="5050" style="left:1482px;top:320px;width:198px"><div class="n">04</div><div class="t">OSS</div></div>
+    <div class="r" data-at="5500" style="left:852px;top:456px;width:828px">
+      <div class="b accent">风险（推断）</div>
+      <p>enable=false 的 chat 删除时跳过 FuncSea 清理，资源可能残留。</p>
+    </div>
+    <p class="fn two r" data-at="6000"><span>出处</span><span class="mono">BE/src/service/message/message.py:6779-6831 · BE/tests/service/message/test_funcsea_restore_compat.py:144-150</span><br><span class="mono cont">BE/…/funcsea_supabase_mutex.py:41-50 · BE/src/taskiq_queue/tasks/funcsea_tasks.py:21-61 · INFRA/…/cleanup.go:77-104 · BE/src/service/chat/chat.py:1676</span></p>
+  </section>
+
+  <!-- 18 差异与未确认 -->
+  <section class="scene" data-dur="8000" data-end="5600" data-name="差异与边界">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>文档与代码的差异，及未确认项</span></span></h2>
+    <div class="dth r" data-at="400" style="top:112px"><span>项</span><span>文档或旧说法</span><span>代码是</span></div>
+    <div class="dt r" data-at="600" style="top:152px"><span class="k">发布接口</span><span class="d mono" style="font-size:18px">POST …/deploy</span><span class="c mono" style="font-size:18px">PUT /v1/chats/{id}/deployment</span></div>
+    <div class="dt r" data-at="900" style="top:224px"><span class="k">sync 时机</span><span class="d">发布流程最先执行</span><span class="c">在 reserve_subdomain 之后</span></div>
+    <div class="dt r" data-at="1200" style="top:296px"><span class="k">部署阶段名</span><span class="d">文档阶段有 3 个不在枚举</span><span class="c">只影响 UI 少显示一步</span></div>
+    <div class="dt r" data-at="1500" style="top:368px"><span class="k">计费阈值</span><span class="d">cost README 写 $0.00002</span><span class="c">$0.000002</span></div>
+    <div class="dt r" data-at="1800" style="top:440px;border-bottom:1px solid var(--line)"><span class="k">开启入口</span><span class="d">backend 保留 metadata 路径</span><span class="c">前端无触发源，只有 Agent 开启</span></div>
+    <div class="label muted r" data-at="2400" style="left:0;top:552px">未确认</div>
+    <div class="r" data-at="2600" style="left:0;top:592px;width:1254px;display:flex;flex-wrap:wrap;gap:8px">
+      <span class="chip mu">DEV env 占位符由谁替换</span><span class="chip mu">jenkins-scripts 内部步骤</span><span class="chip mu">Kong 通配插件源码</span><span class="chip mu">@metagptx/web-sdk 源码</span><span class="chip mu">生产配置值：利润系数、Lambda 规格、Kong 双写开关</span>
+    </div>
+    <div class="redblock wy" data-at="2800" style="left:1278px;top:0;width:402px;height:704px">
+      <div class="r" data-at="3200" style="font-size:36px;font-weight:700;line-height:1.3;margin-bottom:24px">边界</div>
+      <ul class="lim">
+        <li class="r" data-at="3400">全部来自源码与仓库文档的静态阅读，未运行服务、测试或线上调用</li>
+        <li class="r" data-at="3550">infra、deploysvc、cost 是 HelpFlow 下的外部副本，可能与线上不同</li>
+        <li class="r" data-at="3700">标“推断”的条目未经运行验证</li>
+        <li class="r" data-at="3850">结论只对 2026-10-21 工作树成立</li>
+      </ul>
+    </div>
+    <p class="fn r" data-at="4400"><span>出处</span><span class="mono">BE/docs/func-sea-infra.md:351 · BE/docs/version-build-flow.md:620 · BE/…/funcsea_deploy.py:338-339 · COST/README.md:26 · D §2 · lead-notes §1 §4</span></p>
+  </section>
+
+  <nav class="progress" id="progress" aria-label="场景"></nav>
+  <div class="hint"><span id="hint">点击 / → 下一页 · ← 上一页 · A 自动播放</span><button class="mode" id="mode" type="button" aria-pressed="false"><i></i>自动</button></div>
+</div>
+<div id="rotate">横屏观看效果更佳</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const fit = () => document.documentElement.style.setProperty('--s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  addEventListener('resize', fit); fit();
+
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = p => RM ? (p > 0 ? 1 : 0) : 1 - Math.pow(1 - p, 3);
+  const ease2 = p => RM ? (p > 0 ? 1 : 0) : (p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  const el = (tag, cls, css) => { const e = document.createElement(tag); if (cls) e.className = cls; if (css) e.style.cssText = css; return e; };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const sv = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const pad = n => String(n).padStart(2, '0');
+
+  // S4 生命周期节点：findings/A-lifecycle-fact.md §1
+  const LIFE = ['规划', '激活', '生成', '沙箱预览', '打版本', 'DEV 部署', '切版预览', 'Publish', 'PROD', '暂停/下线', 'edit/retry', '删除'];
+  const TK = [1, 4], L0 = 1200, LSTEP = 450;
+  const life = document.getElementById('life');
+  LIFE.forEach((name, i) => {
+    const tk = TK.includes(i);
+    const nd = el('div', 'lnode r' + (tk ? ' tk' : ''), `position:absolute;left:${i * 142}px;top:0;width:118px;height:704px`);
+    nd.dataset.at = 300 + i * 60;
+    nd.dataset.lit = L0 + i * LSTEP;
+    nd.append(el('i', 'ld'));
+    const nm = el('div', 'lnm');
+    const n = el('div', 'n'); n.textContent = pad(i + 1);
+    const t = el('div', 't'); t.textContent = name;
+    nm.append(n, t); nd.append(nm);
+    if (i >= 2) { nd.append(el('b', 'br')); const bt = el('span', 'brt'); bt.textContent = 'FuncSea 分支'; nd.append(bt); }
+    if (tk) { const l = el('span', 'tkl'); l.textContent = '接管点 ' + (i === 1 ? 1 : 2); nd.append(l); }
+    life.append(nd);
+  });
+
+  // S11 端到端时序：lead-notes §3 第 11 幕
+  const LANES = ['thinking', 'backend', 'deploysvc', 'Jenkins', 'infra', 'Kong'];
+  const QX = [104, 313, 522, 731, 940, 1149];
+  const QY = i => 84 + i * 46;
+  const STEPS = [
+    [0, 0, '打版本：DEV 构建换成 Lambda 部署', 'TH/chat.py:7827'],
+    [0, 0, '复制到 build/vN', 'TH/chat.py:6415'],
+    [0, 1, 'gRPC StartDeployFuncseaCallback', 'BE/…/mgx_callback_server.py:540', 1],
+    [1, 2, 'POST /api/v1/tasks', 'BE/…/funcsea_deploy.py:1051', 1],
+    [2, 3, '入 Redis 队列或触发 Jenkins', 'DSVC/services/proxy.py:51,376'],
+    [3, 3, '构建镜像，推 ECR（仅文档）', 'BE/docs/func-sea-infra.md:113'],
+    [3, 4, '建 Lambda + Function URL', 'INFRA/…/cloud_func.go:635,650'],
+    [4, 4, '健康检查，约 15 秒', 'INFRA/…/cloud_func.go:672'],
+    [4, 5, '配 DEV 域名', 'INFRA/…/domain.go:682'],
+    [3, 2, '阶段回调；env 阶段改写为 SUCCESS', 'DSVC/services/proxy.py:762,823'],
+    [2, 1, '/callback/funcsea-deploy-result', 'BE/…/funcsea_deploy.py:1712', 1],
+    [1, 0, 'FUNCSEA_DEPLOY_RESULT', 'BE/…/chat_task.py:2627', 1]
+  ];
+  const Q0 = 900, QSTEP = 480, QMOVE = 400;
+  const seq = document.getElementById('seq'), sleg = document.getElementById('sleg');
+  const qsvg = sv('svg', { width: 1254, height: 608, viewBox: '0 0 1254 608' });
+  qsvg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible';
+  seq.append(qsvg);
+  LANES.forEach((n, k) => {
+    const l = sv('line', { class: 'lfl fade', x1: QX[k], y1: 52, x2: QX[k], y2: 600 }); l.dataset.at = 400 + k * 60; qsvg.append(l);
+    const h = el('div', 'lh r', `position:absolute;left:${QX[k] - 90}px;top:0;width:180px`); h.textContent = n; h.dataset.at = 300 + k * 60; seq.append(h);
+  });
+  const qwait = sv('rect', { class: 'hot-bg', x: QX[0] - 4, y: QY(2), width: 8, height: 0 }); qsvg.append(qwait);
+  STEPS.forEach(([a, b, label, ref, mono], i) => {
+    const T = Q0 + i * QSTEP, y = QY(i);
+    if (a === b) {
+      const r = sv('rect', { class: 'act fade', x: QX[a] - 6, y: y - 14, width: 12, height: 28 }); r.dataset.at = T; qsvg.append(r);
+    } else {
+      const back = i >= 9;
+      const p = sv('path', { class: 'msg dl' + (back ? ' back' : ''), d: `M${QX[a]},${y} H${QX[b]}`, pathLength: 1 }); p.dataset.at = T; qsvg.append(p);
+      const dir = QX[b] > QX[a] ? 1 : -1, xe = QX[b];
+      const hd = sv('polygon', { class: 'ahd fade', points: `${xe - dir * 12},${y - 7} ${xe},${y} ${xe - dir * 12},${y + 7}` });
+      if (back) hd.style.fill = 'var(--red)';
+      hd.dataset.at = T + 350; qsvg.append(hd);
+    }
+    const lx = a === b ? QX[a] + 14 : Math.min(QX[a], QX[b]) + 12;
+    const lb = el('div', 'ml fade' + (mono ? ' mono' : ''), `left:${lx}px;top:${a === b ? y - 14 : y - 30}px`);
+    lb.textContent = label; lb.dataset.at = T; seq.append(lb);
+    const lg = el('div', 'lgd r', `top:${y - 22}px`);
+    const n = el('span', 'n'); n.textContent = pad(i + 1);
+    const m = el('span', 'mono'); m.textContent = ref;
+    lg.append(n, m); lg.dataset.at = 600 + i * 40; lg.dataset.lit = T; sleg.append(lg);
+  });
+  const qtok = sv('rect', { class: 'tok', x: -8, y: -8, width: 16, height: 16, opacity: 0 }); qsvg.append(qtok);
+  const qdone = el('div', 'ml fade b', `left:${QX[0] + 14}px;top:${QY(11) + 12}px;color:var(--red-text)`);
+  qdone.textContent = '回调到达，结束等待'; qdone.dataset.at = Q0 + 11 * QSTEP + QMOVE; seq.append(qdone);
+
+  document.querySelectorAll('[data-seq]').forEach(p => {
+    const [a, b] = p.dataset.seq.split(',').map(Number);
+    [...p.children].forEach((c, i) => { if (!c.dataset.at) c.dataset.at = a + i * b; });
+  });
+
+  const place = (tok, x, y) => tok.setAttribute('transform', `translate(${x},${y})`);
+  const along = (path, p) => path.getPointAtLength(p * path.getTotalLength());
+
+  // S6 令牌分段：[开始, 结束, 起点 x, 终点 x]
+  const GSEG = [[900, 1400, 130, 244], [1800, 2900, 244, 812], [3300, 3800, 812, 1096], [4200, 4700, 1096, 1290]];
+  const R0 = 1400, RSTEP = 900, RMOVE = 700;
+  const STAGES = ['load_app_env_success', 'create_database_success', 'sync_database_success', 'build_docker_image', 'push_to_ecr',
+    'create_lambda_function', 'waiting_for_lambda_health_success', 'update_lambda_environment_variables'];
+  const B0 = 900, BC = 1000, BF = 780;
+
+  const hooks = {
+    life(t, sc) {
+      const run = sc.querySelector('#lrun');
+      const p = clamp((t - L0) / (11 * LSTEP));
+      run.style.transform = `translateX(${4 + p * 1562}px)`;
+      run.style.opacity = t >= L0 - 300 && p < 1 ? 1 : 0;
+    },
+    gates(t, sc) {
+      const tok = sc.querySelector('#gtok');
+      let x = GSEG[0][2];
+      for (const [a, b, x0, x1] of GSEG) if (t >= a) x = x0 + (x1 - x0) * ease2(clamp((t - a) / (b - a)));
+      tok.style.transform = `translateX(${x}px)`;
+      tok.style.opacity = t < 700 ? 0 : t < 4700 ? 1 : clamp(1 - (t - 4700) / 300);
+    },
+    route(t, sc) {
+      const tok = sc.querySelector('#rtok');
+      let on = false;
+      for (let i = 0; i < 6; i++) {
+        const p = (t - (R0 + i * RSTEP)) / RMOVE;
+        if (p >= 0 && p <= 1.15) {
+          const pt = along(sc.querySelector('#rp' + i), ease2(clamp(p)));
+          place(tok, pt.x, pt.y); on = true;
+        }
+      }
+      tok.setAttribute('opacity', on ? 1 : 0);
+    },
+    ph(t, sc) {
+      const c = sc.querySelector('#pcar');
+      const s = t < 800 ? -1 : t < 2400 ? 0 : t < 4000 ? 1 : t < 5600 ? 2 : 3;
+      c.style.opacity = s < 0 ? 0 : 1;
+      c.style.transform = `translateX(${Math.max(s, 0) * 426}px)`;
+    },
+    seq(t) {
+      let on = false;
+      STEPS.forEach(([a, b], i) => {
+        const p = (t - (Q0 + i * QSTEP)) / QMOVE;
+        if (p >= 0 && p <= 1.15) {
+          const q = ease2(clamp(p));
+          const x = a === b ? QX[a] + Math.sin(q * Math.PI) * 32 : QX[a] + (QX[b] - QX[a]) * q;
+          place(qtok, x, QY(i)); on = true;
+        }
+      });
+      qtok.setAttribute('opacity', on ? 1 : 0);
+      const w = clamp((t - (Q0 + 2 * QSTEP)) / (9 * QSTEP + QMOVE));
+      qwait.setAttribute('height', w * (QY(11) - QY(2)));
+      document.getElementById('qfill').style.transform = `scaleX(${w})`;
+    },
+    fsm(t, sc) {
+      const tok = sc.querySelector('#ftok'), stg = sc.querySelector('#stg');
+      sc.querySelectorAll('.st.cur,.fe.cur').forEach(e => e.classList.remove('cur'));
+      const cur = id => sc.querySelector('#' + id).classList.add('cur');
+      const k = Math.max(0, Math.min(7, Math.floor((t - 1700) / 400)));
+      stg.textContent = STAGES[k];
+      stg.classList.toggle('hot', k === 7);
+      if (t < 1200) { cur('z-init'); tok.setAttribute('opacity', 0); }
+      else if (t < 1700) {
+        const p = ease2(clamp((t - 1200) / 500)), pt = along(sc.querySelector('#e-ib'), p);
+        place(tok, pt.x, pt.y); tok.setAttribute('opacity', 1); sc.querySelector('#e-ib').classList.add('cur'); cur(p > .9 ? 'z-bld' : 'z-init');
+      } else if (t < 5000) { cur('z-bld'); tok.setAttribute('opacity', 0); }
+      else if (t < 5500) {
+        const p = ease2(clamp((t - 5000) / 500)), pt = along(sc.querySelector('#e-bs'), p);
+        place(tok, pt.x, pt.y); tok.setAttribute('opacity', 1); sc.querySelector('#e-bs').classList.add('cur'); cur(p > .9 ? 'z-suc' : 'z-bld');
+      } else { cur('z-suc'); sc.querySelector('#e-bs').classList.add('cur'); tok.setAttribute('opacity', 0); }
+      const a = clamp((t - 6600) / 1000) * 330;
+      sc.querySelector('#chand').setAttribute('transform', `rotate(${a} 24 24)`);
+    },
+    bill(t, sc) {
+      const f = sc.querySelector('#bfill');
+      let v = 0, hot = false;
+      if (t >= B0) {
+        const k = Math.floor((t - B0) / BC), r = (t - B0) % BC;
+        if (k < 3) { if (r < BF) v = ease(r / BF); else { v = 1; hot = true; } }
+        else v = .35 * ease(clamp(r / 500 + (k > 3 ? 1 : 0)));
+      }
+      f.style.transform = `scaleX(${v})`;
+      f.classList.toggle('hot', hot);
+      const ptr = sc.querySelector('#bptr'), p = clamp((t - 4400) / 2400);
+      ptr.style.transform = `translateX(${p * 1664}px)`;
+      ptr.style.opacity = t >= 4300 ? 1 : 0;
+    }
+  };
+
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({
+    el, dur: +el.dataset.dur, end: +(el.dataset.end || el.dataset.dur), name: el.dataset.name, hook: hooks[el.dataset.hook],
+    cues: [...el.querySelectorAll('[data-at]')].map(e => ({ e, at: +e.dataset.at })),
+    lits: [...el.querySelectorAll('[data-lit]')].map(e => ({ e, at: +e.dataset.lit })),
+    cnts: [...el.querySelectorAll('.cnt')].map(e => ({ e, to: +e.dataset.to, c0: +e.dataset.c0, cd: +e.dataset.cd }))
+  }));
+
+  const progress = document.getElementById('progress');
+  const segs = scenes.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg';
+    b.setAttribute('aria-label', `第 ${i + 1} 幕：${s.name}`);
+    b.innerHTML = '<i></i>';
+    b.addEventListener('click', e => { e.stopPropagation(); go(i); });
+    progress.append(b);
+    return b;
+  });
+  const label = document.getElementById('sceneLabel');
+  const hint = document.getElementById('hint');
+  const modeBtn = document.getElementById('mode');
+
+  let cur = 0, t = 0, paused = false, last = performance.now(), leaving = null, snapNext = false, floor = 0;
+  let auto = new URLSearchParams(location.search).get('mode') === 'auto';
+
+  // floor：已跳到终态的页面至少按结束时刻绘制（自动模式下时钟仍从 0 走到 data-dur）
+  function paint(s, all) {
+    const tv = Math.max(t, floor);
+    for (const c of s.cues) if (all || tv >= c.at) c.e.classList.add('on');
+    for (const c of s.lits) c.e.classList.toggle('lit', tv >= c.at);
+    for (const c of s.cnts) c.e.textContent = Math.round(c.to * (all ? 1 : ease(clamp((tv - c.c0) / c.cd))));
+    if (s.hook) s.hook(tv, s.el);
+  }
+  // 跳到最终画面：关掉过渡，以结束时刻绘制
+  function snap(s) {
+    s.el.classList.add('snap');
+    t = s.end;
+    paint(s, true);
+    void s.el.offsetWidth;
+    s.el.classList.remove('snap');
+  }
+  function finishLeave() {
+    leaving.el.classList.remove('is-leaving');
+    leaving.cues.forEach(c => c.e.classList.remove('on'));
+    leaving.lits.forEach(c => c.e.classList.remove('lit'));
+    leaving = null;
+  }
+  function go(i, final = false) {
+    i = (i + scenes.length) % scenes.length;
+    if (leaving) finishLeave();
+    const old = scenes[cur];
+    old.el.classList.remove('is-active');
+    old.el.classList.add('is-leaving');
+    leaving = old;
+    cur = i; t = -220; snapNext = final; floor = 0;
+    label.textContent = `${pad(cur + 1)} / ${pad(scenes.length)}　${scenes[cur].name}`;
+  }
+  function next() {
+    if (cur === scenes.length - 1) return;
+    const s = scenes[cur];
+    if (s.el.classList.contains('is-active') && t < s.end) snap(s);
+    go(cur + 1);
+  }
+  function prev() {
+    if (cur > 0) go(cur - 1, true);
+  }
+  function render() {
+    hint.textContent = !auto ? '点击 / → 下一页 · ← 上一页 · A 自动播放'
+      : paused ? '已暂停 · 空格 / 点击 继续' : '空格 / 点击 暂停 · ← → 切换 · A 手动模式';
+    modeBtn.setAttribute('aria-pressed', auto);
+  }
+  function setPaused(v) { paused = v; render(); }
+  function setAuto(v) {
+    auto = v; paused = false;
+    if (!auto) t = Math.min(t, scenes[cur].end);
+    render();
+  }
+
+  function tick(now) {
+    const dt = Math.min(now - last, 100);
+    last = now;
+    const s = scenes[cur];
+    if (!(auto && paused)) t += dt;
+    if (!auto) t = Math.min(t, s.end);
+    if (t >= 0 && !s.el.classList.contains('is-active')) {
+      if (leaving) finishLeave();
+      // 未激活时过渡已关闭：此时绘制的状态不会产生动画
+      if (snapNext || RM) { floor = s.end; if (!auto) t = s.end; paint(s, true); }
+      else if (s.hook) s.hook(t, s.el);
+      snapNext = false;
+      void s.el.offsetWidth;
+      s.el.classList.add('is-active');
+    }
+    if (t >= 0) paint(s);
+    segs.forEach((b, i) => {
+      b.classList.toggle('cur', i === cur);
+      b.firstChild.style.setProperty('--p', i < cur ? 1 : i > cur ? 0 : clamp(t / (auto ? s.dur : s.end)));
+    });
+    if (auto && t >= s.dur) go(cur + 1);
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'a' || e.key === 'A') setAuto(!auto);
+    else if (e.code === 'Space') { e.preventDefault(); auto ? setPaused(!paused) : next(); }
+    else if (e.key === 'ArrowRight') auto ? go(cur + 1) : next();
+    else if (e.key === 'ArrowLeft') auto ? go(cur - 1) : prev();
+    else if (!auto && e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (!auto && e.key === 'PageUp') { e.preventDefault(); prev(); }
+  });
+  stage.addEventListener('click', () => auto ? setPaused(!paused) : next());
+  modeBtn.addEventListener('click', e => { e.stopPropagation(); setAuto(!auto); });
+
+  label.textContent = `01 / ${pad(scenes.length)}　${scenes[0].name}`;
+  render();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

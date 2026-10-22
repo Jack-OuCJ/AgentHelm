@@ -1,0 +1,649 @@
+<!doctype html>
+<!--
+约束简报（refactoring-ui Workflow B，先于标记写下）
+Step 0：纯 HTML，无框架、无 Tailwind、无既有 token、无组件库、无暗色模式 → 本文件内建一套 token。
+风格：瑞士国际主义 —— 12 栏网格、齐左、无衬线、黑白 + 单一红色强调、细线与大号数字。
+
+内容排序（每幕一个主信息）
+  主：AgentHelm 是本地优先的多智能体工作区，一切状态留在当前 checkout。
+  次：三种角色、任务流程、文件交接、模型分配、领域技能、单向观测。
+  三：命令、路径、边界说明。
+  主操作：仅一个 —— 结尾的启动命令；其余皆为说明。
+
+Token（palette 由 generate_palette.py 生成，配对由 check_contrast.py 校验）
+  paper #fafafa · line #dbdbdb · line-2 #bdbdbd（仅装饰）
+  ink #171717 (17.18:1) · ink-2 #6a6a6a (5.18:1) · red #df1623 (paper 上 4.70:1；paper 字于 red 上 4.70:1)
+  red-text #c70b16 (5.77:1)
+  文字色仅三种：ink / ink-2 / red-text；红底上只用 paper。
+  字号：18 20 24 30 36 48 72 96 128；display 192 仅用于首幕标题。字重仅 400 / 700。
+  间距：4 8 12 16 24 32 48 64 96 128。
+  网格：1920×1080 舞台，左右边距 120，栏宽 118，栏距 24。
+  正文行长 ≤ 35em；组间距 > 组内距。
+动效：入场 600–700ms cubic-bezier(.2,0,0,1)，离场 200ms 加速，错位 80ms 起；尊重 prefers-reduced-motion。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentHelm 系统介绍</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --paper:#fafafa;--line:#dbdbdb;--line-2:#bdbdbd;
+  --ink:#171717;--ink-2:#6a6a6a;--red:#df1623;--red-text:#c70b16;
+  --ease:cubic-bezier(.2,0,0,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --sans:"Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB",sans-serif;
+  --mono:"SF Mono",Menlo,Consolas,"PingFang SC",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);overflow:hidden}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform:translate(-50%,-50%) scale(var(--s,1));
+  background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:20px;line-height:1.6;overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+.mono{font-family:var(--mono)}
+.nw{white-space:nowrap}
+.muted{color:var(--ink-2)}
+.accent{color:var(--red-text)}
+.b{font-weight:700}
+.small{font-size:18px}
+h2,p,dl,dd,ul{margin:0;padding:0}
+ul{list-style:none}
+
+/* 外框 */
+.top{position:absolute;top:48px;left:120px;right:120px;display:flex;justify-content:space-between;align-items:baseline;
+  padding-bottom:24px;border-bottom:2px solid var(--ink)}
+.top .b{font-size:20px}
+.top .muted{font-variant-numeric:tabular-nums}
+.progress{position:absolute;left:120px;right:120px;bottom:60px;display:flex;gap:8px}
+.seg{flex:1;padding:12px 0;border:0;background:none;cursor:pointer}
+.seg i{position:relative;display:block;height:4px;background:var(--line)}
+.seg i::after{content:"";position:absolute;inset:0;background:var(--ink);transform:scaleX(var(--p,0));transform-origin:left}
+.seg.cur i::after{background:var(--red)}
+.seg:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+.hint{position:absolute;right:120px;bottom:24px;display:flex;align-items:center;gap:24px;font-size:18px;color:var(--ink-2)}
+.mode{display:flex;align-items:center;gap:12px;height:28px;padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer}
+.mode i{position:relative;width:40px;height:20px;border:2px solid var(--ink-2);flex:none;transition:background 200ms var(--ease),border-color 200ms var(--ease)}
+.mode i::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;background:var(--ink-2);transition:transform 200ms var(--ease),background 200ms var(--ease)}
+.mode[aria-pressed=true]{color:var(--ink);font-weight:700}
+.mode[aria-pressed=true] i{background:var(--red);border-color:var(--red)}
+.mode[aria-pressed=true] i::after{background:var(--paper);transform:translateX(20px)}
+.mode:focus-visible{outline:2px solid var(--ink);outline-offset:4px}
+
+/* 场景 */
+.scene{position:absolute;top:160px;left:120px;width:1680px;height:792px;opacity:0;visibility:hidden}
+.scene.is-active{opacity:1;visibility:visible}
+.scene.is-leaving{opacity:0;visibility:visible;transition:opacity 200ms var(--ease-in)}
+.scene>*{position:absolute}
+.scene:not(.is-active):not(.is-leaving) *,.scene.snap *{transition:none!important}
+
+.h2{font-size:48px;font-weight:700;line-height:1.2;letter-spacing:-.01em}
+.label{font-size:20px;font-weight:700}
+
+/* 揭示原语 */
+.r{opacity:0;transform:translateY(24px);transition:opacity 600ms var(--ease),transform 600ms var(--ease)}
+.r.on{opacity:1;transform:none}
+.m{display:block;overflow:hidden;padding-bottom:.12em;margin-bottom:-.12em}
+.m>span{display:block;transform:translateY(110%);transition:transform 700ms var(--ease)}
+.m.on>span{transform:none}
+.wx{transform:scaleX(0);transform-origin:left;transition:transform 700ms var(--ease)}
+.wx.on{transform:none}
+.wy{transform:scaleY(0);transform-origin:top;transition:transform 700ms var(--ease)}
+.wy.on{transform:none}
+.wc{clip-path:inset(0 100% 0 0);transition:clip-path 700ms var(--ease)}
+.wc.on{clip-path:inset(0 0 0 0)}
+
+/* S1 */
+.col{top:0;width:118px;height:792px;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.display{font-size:192px;font-weight:700;line-height:.92;letter-spacing:-.04em}
+.redblock{background:var(--red);color:var(--paper);display:flex;flex-direction:column;justify-content:flex-end;padding:32px}
+.redblock div{font-size:36px;font-weight:700;line-height:1.3}
+.redblock .small{font-weight:400;font-size:18px;margin-top:16px}
+
+/* S2 */
+.box{padding:32px}
+.box-home{border:2px dashed var(--line-2)}
+.box-ah{border:2px solid var(--ink);border-top:8px solid var(--red)}
+.box-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.box-head .mono{font-size:24px;font-weight:700}
+.tag{font-size:18px;font-weight:700;padding:0 12px;line-height:32px}
+.tag-ro{border:2px solid var(--ink-2);color:var(--ink-2)}
+.tag-rw{background:var(--red);color:var(--paper)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;color:var(--ink-2)}
+.rows>li{display:flex;justify-content:space-between;align-items:center;height:64px;border-top:1px solid var(--line)}
+.note{border-left:4px solid var(--red);padding-left:24px}
+
+/* S3 */
+.role .bar{height:4px;background:var(--ink)}
+.role .bar.red{background:var(--red)}
+.role .num{font-size:96px;font-weight:700;line-height:1;margin-top:24px;color:var(--ink-2);letter-spacing:-.02em}
+.role .name{font-size:36px;font-weight:700;line-height:1.2;margin-top:24px}
+.role .cn{font-size:24px;color:var(--ink-2);margin-top:4px}
+.role dl{margin-top:48px}
+.kv{margin-bottom:16px}
+.kv dt{font-size:18px;color:var(--ink-2)}
+
+/* S4 / S8 */
+.track{height:2px;background:var(--ink)}
+.dot{width:24px;height:24px;border:2px solid var(--ink);background:var(--paper);transition:background 200ms var(--ease)}
+.dot.on{background:var(--ink)}
+.dot.last.on{background:var(--red);border-color:var(--red)}
+.runner{width:24px;height:24px;background:var(--red);opacity:0}
+.node{width:312px}
+.node .n{font-size:18px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.node .t{font-size:30px;font-weight:700;line-height:1.3}
+.node .mono{font-size:18px;color:var(--ink-2);margin-top:8px}
+.node .d{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);width:288px}
+
+/* S5 */
+.check li{display:flex;align-items:center;gap:16px;height:40px}
+.check i{width:20px;height:20px;border:2px solid var(--ink);flex:none;transition:background 200ms var(--ease) 300ms}
+.check li.on i{background:var(--ink)}
+.frame{border:2px solid var(--ink)}
+.frame-bar{height:48px;border-bottom:2px solid var(--ink);display:flex;justify-content:space-between;align-items:center;padding:0 24px;font-size:18px}
+.pane{position:absolute;padding:24px}
+.pane .mono{font-size:18px;font-weight:700;display:flex;align-items:center;gap:12px}
+.pane .mono i{width:12px;height:12px;background:var(--red)}
+.pane .mono i.off{background:var(--ink)}
+.ln{height:8px;background:var(--line);margin-top:16px}
+.vdiv{width:2px;background:var(--ink)}
+.hdiv{height:2px;background:var(--ink)}
+.ftag{border-top:2px solid var(--ink);padding-top:16px}
+.ftag .mono{font-size:20px;font-weight:700}
+
+/* S6 */
+.bars{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px}
+.bars>div{height:96px;display:flex;align-items:flex-end;padding:12px;font-size:20px;font-weight:700;line-height:1.2;color:var(--paper)}
+.bars .k{background:var(--ink)}
+.bars .c{background:var(--red)}
+.bars .e{border:2px solid var(--line)}
+.cli{font-size:36px;font-weight:700;line-height:1.2}
+
+/* S7 */
+.big{font-size:128px;font-weight:700;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+#mx i{position:absolute;left:0;top:0;width:20px;height:20px;background:var(--ink);opacity:0;
+  transform:translate(var(--x0),var(--y0));
+  transition:opacity 300ms var(--ease) var(--di),transform 900ms var(--ease) var(--ds)}
+.mxw.on #mx i{opacity:1}
+#mx.on i{transform:translate(var(--x1),var(--y1))}
+.mxl{position:absolute;left:0;width:340px;height:36px;display:flex;justify-content:space-between;align-items:center;font-size:18px;line-height:1}
+.mxl span{color:var(--ink-2)}
+
+/* S8 */
+.sbox{height:136px;border:2px solid var(--ink);padding:24px}
+.sbox.ext{border-style:dashed}
+.sbox .mono{font-size:24px;font-weight:700;line-height:1.3}
+.arrow{height:2px;background:var(--ink)}
+.arrow::after{content:"";position:absolute;right:-2px;top:-7px;border:8px solid transparent;border-left:12px solid var(--ink);border-right:0}
+.arrow.dash{background:repeating-linear-gradient(90deg,var(--ink) 0 8px,transparent 8px 16px)}
+.map li{display:grid;grid-template-columns:240px 64px 1fr;align-items:center;height:56px;border-top:1px solid var(--line)}
+.notes li{display:flex;gap:24px;min-height:56px;align-items:center;border-top:1px solid var(--line)}
+
+/* S9 */
+.cmd{margin-bottom:32px}
+.cmd .cmt{font-family:var(--mono);font-size:18px;color:var(--ink-2)}
+.cmd .line{font-family:var(--mono);font-size:24px;line-height:1.5;white-space:pre}
+.ps{color:var(--red-text);font-weight:700}
+.caret{display:inline-block;width:.6em;height:1.1em;vertical-align:-.2em;background:var(--red);visibility:hidden}
+.word{font-size:128px;font-weight:700;line-height:1;letter-spacing:-.04em}
+
+#rotate{display:none;position:fixed;left:0;right:0;top:calc(50% + 540px * var(--s,1) + 24px);text-align:center;font:18px/1.5 var(--sans);color:var(--ink-2)}
+@media (orientation:portrait) and (max-width:700px){#rotate{display:block}}
+
+@media (prefers-reduced-motion:reduce){
+  .r,.m>span,.wx,.wy,.wc{transform:none!important;clip-path:none!important;opacity:0;transition:opacity 200ms linear!important}
+  .r.on,.m.on>span,.wx.on,.wy.on,.wc.on{opacity:1}
+  #mx i{transition:opacity 200ms linear!important}
+}
+</style>
+</head>
+<body>
+<div id="stage" aria-roledescription="动画演示">
+  <header class="top"><span class="b">AgentHelm</span><span class="muted" id="sceneLabel">01 / 09</span></header>
+
+  <!-- 1 介绍 -->
+  <section class="scene" data-dur="6500" data-end="2400" data-name="介绍">
+    <div class="col wy" data-at="0" style="left:0"></div>
+    <div class="col wy" data-at="40" style="left:142px"></div>
+    <div class="col wy" data-at="80" style="left:284px"></div>
+    <div class="col wy" data-at="120" style="left:426px"></div>
+    <div class="col wy" data-at="160" style="left:568px"></div>
+    <div class="col wy" data-at="200" style="left:710px"></div>
+    <div class="col wy" data-at="240" style="left:852px"></div>
+    <div class="col wy" data-at="280" style="left:994px"></div>
+    <div class="col wy" data-at="320" style="left:1136px"></div>
+    <div class="col wy" data-at="360" style="left:1278px"></div>
+    <div class="col wy" data-at="400" style="left:1420px"></div>
+    <div class="col wy" data-at="440" style="left:1562px"></div>
+    <div class="redblock wy" data-at="600" style="left:1278px;top:0;width:402px;height:792px">
+      <div class="r" data-at="1500">Dispatcher</div>
+      <div class="r" data-at="1580">Lead</div>
+      <div class="r" data-at="1660">Executor</div>
+      <p class="small r" data-at="1800">三种角色，按需加载规则</p>
+    </div>
+    <div class="label r" data-at="900" style="left:0;top:0">系统介绍</div>
+    <div class="muted r" data-at="1000" style="left:852px;top:0;font-size:18px">Jack-OuCJ / AgentHelm · MIT License</div>
+    <h2 class="display" style="left:0;top:96px">
+      <span class="m" data-at="1100"><span>Agent</span></span>
+      <span class="m" data-at="1250"><span>Helm</span></span>
+    </h2>
+    <div class="wx" data-at="1600" style="left:0;top:576px;width:1254px;height:2px;background:var(--ink)"></div>
+    <p class="r" data-at="1800" style="left:0;top:624px;width:710px;font-size:30px;line-height:1.5">本地优先的多智能体工作区。<br>规则、技能与任务状态，都留在当前 checkout。</p>
+  </section>
+
+  <!-- 2 原则 -->
+  <section class="scene" data-dur="7500" data-end="3100" data-name="配置分域">
+    <h2 class="h2" style="left:0;top:0">
+      <span class="m" data-at="200"><span>全局只读，</span></span>
+      <span class="m" data-at="320"><span>工作区可写</span></span>
+    </h2>
+    <p class="r" data-at="600" style="left:0;top:180px;width:600px">AgentHelm 的规则入口、技能注册、配置与任务状态都位于当前 checkout。HOME 中的全局规则、skills、插件与凭据保持原样；项目规则也不授予额外权限。</p>
+    <p class="note r" data-at="900" style="left:0;top:400px;width:600px">边界：这是配置分域，不是操作系统级安全隔离。</p>
+    <div class="box box-home r" data-at="1100" style="left:852px;top:0;width:828px">
+      <div class="box-head"><span class="mono">~/ <span class="muted" style="font-weight:400">HOME</span></span><span class="tag tag-ro">只读</span></div>
+      <ul class="grid2" data-seq="1300,80">
+        <li class="r">全局规则</li><li class="r">全局 skills</li><li class="r">插件</li><li class="r">设置与凭据</li>
+      </ul>
+    </div>
+    <div class="box box-ah r" data-at="1900" style="left:852px;top:280px;width:828px">
+      <div class="box-head"><span class="mono">AgentHelm/</span><span class="tag tag-rw">可写</span></div>
+      <ul class="rows" data-seq="2100,120">
+        <li class="r"><span class="mono">.agenthelm/config/</span><span class="muted">配置</span></li>
+        <li class="r"><span class="mono">.agenthelm/state/</span><span class="muted">工具状态</span></li>
+        <li class="r"><span class="mono">experiments/&lt;id&gt;/STATUS</span><span class="muted">任务进度</span></li>
+        <li class="r"><span class="mono">.claude/skills · .agents/skills</span><span class="muted">项目内注册</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3 角色 -->
+  <section class="scene" data-dur="7500" data-end="3200" data-name="角色">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>三种角色，按需加载规则</span></span></h2>
+    <div class="role" style="left:0;top:128px;width:544px">
+      <div class="bar red wx" data-at="600"></div>
+      <div class="num r" data-at="700">01</div>
+      <div class="name r" data-at="800">Dispatcher</div>
+      <div class="cn r" data-at="860">主会话</div>
+      <dl data-seq="1000,80">
+        <div class="kv r"><dt>位置</dt><dd>工作区根目录</dd></div>
+        <div class="kv r"><dt>职责</dt><dd>分派与汇总</dd></div>
+        <div class="kv r"><dt>规则</dt><dd class="mono">references/dispatcher.md</dd></div>
+      </dl>
+    </div>
+    <div class="role" style="left:568px;top:128px;width:544px">
+      <div class="bar wx" data-at="800"></div>
+      <div class="num r" data-at="900">02</div>
+      <div class="name r" data-at="1000">Lead</div>
+      <div class="cn r" data-at="1060">任务组长</div>
+      <dl data-seq="1200,80">
+        <div class="kv r"><dt>位置</dt><dd class="mono">experiments/&lt;id&gt;/</dd></div>
+        <div class="kv r"><dt>职责</dt><dd>设计与验收</dd></div>
+        <div class="kv r"><dt>规则</dt><dd class="mono">references/lead.md</dd></div>
+      </dl>
+    </div>
+    <div class="role" style="left:1136px;top:128px;width:544px">
+      <div class="bar wx" data-at="1000"></div>
+      <div class="num r" data-at="1100">03</div>
+      <div class="name r" data-at="1200">Executor</div>
+      <div class="cn r" data-at="1260">执行者</div>
+      <dl data-seq="1400,80">
+        <div class="kv r"><dt>位置</dt><dd>被明确委派的范围</dd></div>
+        <div class="kv r"><dt>职责</dt><dd>调查、实现、验证</dd></div>
+        <div class="kv r"><dt>规则</dt><dd class="mono">references/executor.md</dd></div>
+      </dl>
+    </div>
+    <p class="muted r" data-at="2600" style="left:0;top:744px">入口 <span class="mono">SKILL.md</span> 只做路由：每个角色只读取当前需要的 reference。</p>
+  </section>
+
+  <!-- 4 流程 -->
+  <section class="scene" data-dur="8000" data-end="6900" data-name="流程" data-hook="flow">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>从一句话到一份结论</span></span></h2>
+    <div class="track wx" data-at="500" style="left:12px;top:299px;width:1344px"></div>
+    <div class="dot" data-at="1300" style="left:0;top:288px"></div>
+    <div class="dot" data-at="2400" style="left:336px;top:288px"></div>
+    <div class="dot" data-at="3500" style="left:672px;top:288px"></div>
+    <div class="dot" data-at="4600" style="left:1008px;top:288px"></div>
+    <div class="dot last" data-at="5700" style="left:1344px;top:288px"></div>
+    <div class="runner" id="runner" style="left:0;top:288px"></div>
+    <div class="node r" data-at="800" style="left:0;top:352px"><div class="n">01</div><div class="t">主会话</div><div class="mono">./bin/dispatch</div><p class="d muted">用一句话描述任务</p></div>
+    <div class="node r" data-at="1900" style="left:336px;top:352px"><div class="n">02</div><div class="t">任务卡</div><div class="mono">cards/my-task.md</div><p class="d muted">写明范围、可写文件与验收</p></div>
+    <div class="node r" data-at="3000" style="left:672px;top:352px"><div class="n">03</div><div class="t">Lead</div><div class="mono">./bin/new-task my-task</div><p class="d muted">独立会话：设计、委派、验收</p></div>
+    <div class="node r" data-at="4100" style="left:1008px;top:352px"><div class="n">04</div><div class="t">Executor</div><div class="mono">bin/run-executor</div><p class="d muted">在明确范围内执行与验证</p></div>
+    <div class="node r" data-at="5200" style="left:1344px;top:352px"><div class="n">05</div><div class="t">结论</div><div class="mono">bin/status done</div><p class="d muted">写入 STATUS，同步看板</p></div>
+    <div class="wx" data-at="6100" style="left:0;top:648px;width:1680px;height:1px;background:var(--line)"></div>
+    <p class="r" data-at="6300" style="left:0;top:680px"><span class="mono b">experiments/001-my-task/</span><span class="muted">　每个任务一个目录、一个 Lead 会话。</span></p>
+  </section>
+
+  <!-- 5 交接 -->
+  <section class="scene" data-dur="8000" data-end="4600" data-name="交接">
+    <h2 class="h2" style="left:0;top:0">
+      <span class="m" data-at="200"><span>文件负责交接</span></span>
+      <span class="m" data-at="320"><span>Herdr 承载会话</span></span>
+    </h2>
+    <p class="r" data-at="700" style="left:0;top:180px;width:600px">子会话不会继承父会话的完整上下文，也不会自动带上已加载的 skill。每次委派都要写明：</p>
+    <ul class="check" data-seq="1100,250" style="left:0;top:300px;width:686px">
+      <li class="r"><i></i>AGENTS.md 与路由的绝对路径</li>
+      <li class="r"><i></i>当前角色</li>
+      <li class="r"><i></i>任务目录</li>
+      <li class="r"><i></i>可写文件</li>
+      <li class="r"><i></i>验收命令</li>
+      <li class="r"><i></i>不改全局配置的边界</li>
+    </ul>
+    <div class="frame r" data-at="1500" style="left:852px;top:0;width:828px;height:480px">
+      <div class="frame-bar"><span class="mono b">herdr</span><span class="muted">3 panes</span></div>
+      <div class="pane r" data-at="1800" style="left:0;top:48px;width:330px;height:428px">
+        <div class="mono"><i></i>dispatcher</div>
+        <div class="ln wx" data-at="2000" style="width:80%"></div>
+        <div class="ln wx" data-at="2080" style="width:60%"></div>
+        <div class="ln wx" data-at="2160" style="width:70%"></div>
+      </div>
+      <div class="vdiv wy" data-at="2000" style="position:absolute;left:330px;top:48px;height:428px"></div>
+      <div class="pane r" data-at="2400" style="left:332px;top:48px;width:492px;height:213px">
+        <div class="mono"><i class="off"></i>lead · experiments/001-my-task</div>
+        <div class="ln wx" data-at="2600" style="width:70%"></div>
+        <div class="ln wx" data-at="2680" style="width:50%"></div>
+      </div>
+      <div class="hdiv wx" data-at="2700" style="position:absolute;left:332px;top:261px;width:492px"></div>
+      <div class="pane r" data-at="3000" style="left:332px;top:263px;width:492px;height:213px">
+        <div class="mono"><i class="off"></i>lead · experiments/&lt;id&gt;</div>
+        <div class="ln wx" data-at="3200" style="width:60%"></div>
+        <div class="ln wx" data-at="3280" style="width:40%"></div>
+      </div>
+    </div>
+    <div class="ftag r" data-at="3600" style="left:852px;top:528px;width:189px"><div class="mono">AGENTS.md</div><div class="muted small">根规则</div></div>
+    <div class="ftag r" data-at="3720" style="left:1065px;top:528px;width:189px"><div class="mono">SKILL.md</div><div class="muted small">角色路由</div></div>
+    <div class="ftag r" data-at="3840" style="left:1278px;top:528px;width:189px"><div class="mono">task-card.md</div><div class="muted small">任务卡</div></div>
+    <div class="ftag r" data-at="3960" style="left:1491px;top:528px;width:189px"><div class="mono">STATUS</div><div class="muted small">任务进度</div></div>
+  </section>
+
+  <!-- 6 模型 -->
+  <section class="scene" data-dur="7000" data-end="4100" data-name="模型">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>十个角色，两套 CLI</span></span></h2>
+    <div class="r" data-at="700" style="left:0;top:200px;width:260px"><div class="cli">Claude</div><div class="muted">7 个角色</div></div>
+    <div class="bars" data-seq="900,80" style="left:284px;top:200px;width:1396px">
+      <div class="k wc">lead</div><div class="k wc">lead_<wbr>important</div><div class="k wc">fact</div><div class="k wc">chore</div>
+      <div class="k wc">writing</div><div class="k wc">visual</div><div class="k wc">aesthetic</div>
+      <div class="e r"></div><div class="e r"></div><div class="e r"></div>
+    </div>
+    <div class="r" data-at="1800" style="left:0;top:360px;width:260px"><div class="cli">Codex</div><div class="muted">3 个角色</div></div>
+    <div class="bars" data-seq="2000,60" style="left:284px;top:360px;width:1396px">
+      <div class="e r"></div><div class="e r"></div><div class="e r"></div><div class="e r"></div>
+      <div class="e r"></div><div class="e r"></div><div class="e r"></div>
+      <div class="c wc">hard</div><div class="c wc">review</div><div class="c wc">simplify</div>
+    </div>
+    <div class="wx" data-at="3000" style="left:0;top:560px;width:1680px;height:1px;background:var(--line)"></div>
+    <ul data-seq="3200,150" style="left:0;top:592px;width:1100px">
+      <li class="r">所有候选均为 <span class="mono">default</span>：沿用已安装 CLI 的模型、账号与权限。</li>
+      <li class="r muted">编辑 <span class="mono">.agenthelm/config/roles.toml</span>，再运行 <span class="mono">./bin/models check</span> 校验。</li>
+      <li class="r muted">目前按角色分工，尚未按价格档位分配模型；review 仅是能力映射，代码审查按用户规则。</li>
+    </ul>
+  </section>
+
+  <!-- 7 技能 -->
+  <section class="scene" data-dur="8500" data-end="4400" data-name="技能" data-hook="skills">
+    <div class="big r" data-at="200" id="n185" style="left:0;top:0">0</div>
+    <div class="r" data-at="400" style="left:0;top:144px"><div class="label">技能入库</div><div class="mono muted small">skills-library/</div></div>
+    <div class="big r accent" data-at="2400" id="n21" style="left:0;top:296px;color:var(--red)">0</div>
+    <div class="r" data-at="2600" style="left:0;top:440px"><div class="label">领域路由</div><div class="mono muted small">route-*</div></div>
+    <p class="muted r" data-at="3800" style="left:0;top:600px;width:520px">每个技能恰好归入一个路由；路由与索引由 <span class="mono nw">bin/build-routers</span> 生成，只注册到本项目。</p>
+    <div class="mxw" data-at="400" style="left:568px;top:0;width:1112px;height:792px">
+      <div id="mx" data-at="2200"></div>
+    </div>
+  </section>
+
+  <!-- 8 观测 -->
+  <section class="scene" data-dur="8000" data-end="4300" data-name="观测">
+    <h2 class="h2" style="left:0;top:0"><span class="m" data-at="200"><span>状态单向同步，不反向触发</span></span></h2>
+    <div class="sbox r" data-at="700" style="left:0;top:128px;width:348px"><div class="mono">bin/status</div><div class="muted small">Lead 主动报告进展</div></div>
+    <div class="arrow wx" data-at="950" style="left:348px;top:195px;width:96px"></div>
+    <div class="sbox r" data-at="1200" style="left:444px;top:128px;width:348px"><div class="mono">STATUS</div><div class="muted small">任务目录，原子更新</div></div>
+    <div class="arrow wx" data-at="1450" style="left:792px;top:195px;width:96px"></div>
+    <div class="sbox r" data-at="1700" style="left:888px;top:128px;width:348px"><div class="mono">BOARD.md</div><div class="muted small">本地看板与索引</div></div>
+    <div class="arrow dash wx" data-at="1950" style="left:1236px;top:195px;width:96px"></div>
+    <div class="sbox ext r" data-at="2200" style="left:1332px;top:128px;width:348px"><div class="mono">飞书看板</div><div class="muted small">bin/board-sync 写入</div></div>
+    <div class="label muted r" data-at="2800" style="left:0;top:360px">状态映射</div>
+    <ul class="map" data-seq="3000,120" style="left:0;top:408px;width:686px">
+      <li class="r"><span class="mono">running</span><span class="muted">→</span><span>进行中</span></li>
+      <li class="r"><span class="mono">needs-input</span><span class="muted">→</span><span>待输入</span></li>
+      <li class="r"><span class="mono">blocked</span><span class="muted">→</span><span>阻塞</span></li>
+      <li class="r"><span class="mono">done</span><span class="muted">→</span><span>完成</span></li>
+    </ul>
+    <div class="label muted r" data-at="3200" style="left:852px;top:360px">边界</div>
+    <ul class="notes" data-seq="3400,150" style="left:852px;top:408px;width:828px">
+      <li class="r"><span class="accent b">01</span><span>飞书中的编辑不会触发本地 Agent。</span></li>
+      <li class="r"><span class="accent b">02</span><span>没有常驻轮询、心跳或定时任务。</span></li>
+      <li class="r"><span class="accent b">03</span><span>同步失败留下 <span class="mono">.feishu-pending</span>，不覆盖本地状态。</span></li>
+    </ul>
+  </section>
+
+  <!-- 9 开始 -->
+  <section class="scene" data-dur="9000" data-end="6400" data-name="开始" data-hook="type">
+    <div style="left:0;top:0;width:1680px">
+      <div class="cmd">
+        <div class="cmt r" data-at="300"># 初始化工作区</div>
+        <div class="line r" data-at="500"><span class="ps">$ </span><span class="type" data-start="700" data-speed="24" data-text="python3 skills/research-setup/scripts/deploy &quot;$PWD&quot; --role dispatcher --env cli-herdr"></span><span class="caret"></span></div>
+      </div>
+      <div class="cmd">
+        <div class="cmt r" data-at="3000"># 进入 Herdr</div>
+        <div class="line r" data-at="3100"><span class="ps">$ </span><span class="type" data-start="3300" data-speed="60" data-text="herdr"></span><span class="caret"></span></div>
+      </div>
+      <div class="cmd">
+        <div class="cmt r" data-at="3800"># 启动主会话</div>
+        <div class="line r" data-at="3900"><span class="ps">$ </span><span class="type" data-start="4100" data-speed="50" data-text="./bin/dispatch"></span><span class="caret"></span></div>
+      </div>
+    </div>
+    <div class="wx" data-at="5000" style="left:0;top:420px;width:1254px;height:2px;background:var(--ink)"></div>
+    <h2 class="word" style="left:0;top:480px"><span class="m" data-at="5200"><span>AgentHelm</span></span></h2>
+    <p class="muted r" data-at="5500" style="left:0;top:640px;font-size:24px">github.com/Jack-OuCJ/AgentHelm · MIT License</p>
+    <div class="redblock wy" data-at="5000" style="left:1278px;top:420px;width:402px;height:372px">
+      <div class="r" data-at="5700">本地优先</div>
+      <div class="r" data-at="5780">多智能体工作区</div>
+    </div>
+  </section>
+
+  <nav class="progress" id="progress" aria-label="场景"></nav>
+  <div class="hint"><span id="hint">点击 / → 下一页 · ← 上一页 · A 自动播放</span><button class="mode" id="mode" type="button" aria-pressed="false"><i></i>自动</button></div>
+</div>
+<div id="rotate">横屏观看效果更佳</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const fit = () => document.documentElement.style.setProperty('--s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  addEventListener('resize', fit); fit();
+
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = p => RM ? (p > 0 ? 1 : 0) : 1 - Math.pow(1 - p, 3);
+
+  // 技能矩阵：数据来自 .agenthelm/config/routers.toml
+  const routers = [
+    ['研究构思与假设检验', 8], ['文献检索、引用与学术评审', 13], ['科研写作、文档与知识整理', 8],
+    ['科学图表、示意图与演示', 9], ['实验设计、统计与数学', 9], ['数据处理、图计算与数据溯源', 7],
+    ['机器学习、强化学习与时间序列', 10], ['计算资源、云计算与 Agent 工具', 6], ['基因组、变异与测序分析', 18],
+    ['单细胞、多组学与系统生物学', 10], ['系统发育与微生物组', 5], ['化学信息学与药物发现', 12],
+    ['蛋白质设计与表征', 4], ['质谱、蛋白组与流式细胞术', 4], ['医学影像、显微成像与神经科学', 12],
+    ['生物医学证据与临床研究', 10], ['实验室自动化、科研平台与质量管理', 14], ['天文学与量子计算', 5],
+    ['工程仿真、材料与制造', 10], ['地理空间与海洋环境', 3], ['GSAP 动画与 SVG 动效', 8]
+  ];
+  const mx = document.getElementById('mx');
+  const COLS = 19, ROWS = 10, STEP = 26, X0 = 380, Y0 = (792 - ROWS * STEP) / 2;
+  let seed = 7;
+  const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const slots = [...Array(COLS * ROWS).keys()];
+  for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]]; }
+  let k = 0;
+  routers.forEach(([name, n], r) => {
+    const lab = document.createElement('div');
+    lab.className = 'mxl r';
+    lab.style.top = r * 36 + 'px';
+    lab.dataset.at = 2500 + r * 40;
+    lab.innerHTML = '<span></span><b></b>';
+    lab.firstChild.textContent = name;
+    lab.lastChild.textContent = n;
+    mx.append(lab);
+    for (let j = 0; j < n; j++, k++) {
+      const p = slots[k], sq = document.createElement('i');
+      sq.style.cssText = `--x0:${X0 + (p % COLS) * STEP}px;--y0:${Y0 + Math.floor(p / COLS) * STEP}px;` +
+        `--x1:${X0 + j * STEP}px;--y1:${r * 36 + 8}px;--di:${p * 4}ms;--ds:${r * 40 + j * 6}ms`;
+      mx.append(sq);
+    }
+  });
+
+  document.querySelectorAll('[data-seq]').forEach(p => {
+    const [a, b] = p.dataset.seq.split(',').map(Number);
+    [...p.children].forEach((c, i) => { if (!c.dataset.at) c.dataset.at = a + i * b; });
+  });
+
+  const hooks = {
+    flow(t, el) {
+      const T = [1300, 2400, 3500, 4600, 5700], MOVE = 700, GAP = 336;
+      const runner = el.querySelector('#runner');
+      let x = 0;
+      for (let i = 1; i < T.length; i++) {
+        const p = clamp((t - (T[i] - MOVE)) / MOVE);
+        if (p > 0) x = (i - 1) * GAP + ease(p) * GAP;
+      }
+      runner.style.transform = `translateX(${x}px)`;
+      runner.style.opacity = clamp((t - (T[0] - 300)) / 300);
+    },
+    skills(t) {
+      document.getElementById('n185').textContent = Math.round(185 * ease(clamp((t - 300) / 1400)));
+      document.getElementById('n21').textContent = Math.round(21 * ease(clamp((t - 2500) / 900)));
+    },
+    type(t, el) {
+      const lines = [...el.querySelectorAll('.type')];
+      let current = lines[0];
+      lines.forEach(s => {
+        const text = s.dataset.text, start = +s.dataset.start, speed = +s.dataset.speed;
+        s.textContent = text.slice(0, Math.max(0, Math.min(text.length, Math.floor((t - start) / speed))));
+        if (t >= start) current = s;
+      });
+      lines.forEach(s => {
+        const caret = s.nextElementSibling;
+        const typing = s.textContent.length < s.dataset.text.length && t >= +s.dataset.start;
+        // 闪烁用墙钟：手动模式下 t 会钳在结束时刻
+        caret.style.visibility = s === current && t >= +s.dataset.start - 200 && (typing || Math.floor(performance.now() / 500) % 2 === 0) ? 'visible' : 'hidden';
+      });
+    }
+  };
+
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({
+    el, dur: +el.dataset.dur, end: +(el.dataset.end || el.dataset.dur), name: el.dataset.name, hook: hooks[el.dataset.hook],
+    cues: [...el.querySelectorAll('[data-at]')].map(e => ({ e, at: +e.dataset.at }))
+  }));
+
+  const progress = document.getElementById('progress');
+  const segs = scenes.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg';
+    b.setAttribute('aria-label', `第 ${i + 1} 幕：${s.name}`);
+    b.innerHTML = '<i></i>';
+    b.addEventListener('click', e => { e.stopPropagation(); go(i); });
+    progress.append(b);
+    return b;
+  });
+  const label = document.getElementById('sceneLabel');
+  const hint = document.getElementById('hint');
+  const modeBtn = document.getElementById('mode');
+  const pad = n => String(n).padStart(2, '0');
+
+  let cur = 0, t = 0, paused = false, last = performance.now(), leaving = null, snapNext = false, floor = 0;
+  let auto = new URLSearchParams(location.search).get('mode') === 'auto';
+
+  // floor：已跳到终态的页面至少按结束时刻绘制（自动模式下时钟仍从 0 走到 data-dur）
+  function paint(s, all) {
+    const tv = Math.max(t, floor);
+    for (const c of s.cues) if (all || tv >= c.at) c.e.classList.add('on');
+    if (s.hook) s.hook(tv, s.el);
+  }
+  // 跳到最终画面：关掉过渡，以结束时刻绘制
+  function snap(s) {
+    s.el.classList.add('snap');
+    t = s.end;
+    paint(s, true);
+    void s.el.offsetWidth;
+    s.el.classList.remove('snap');
+  }
+  function finishLeave() {
+    leaving.el.classList.remove('is-leaving');
+    leaving.cues.forEach(c => c.e.classList.remove('on'));
+    leaving = null;
+  }
+  function go(i, final = false) {
+    i = (i + scenes.length) % scenes.length;
+    if (leaving) finishLeave();
+    const old = scenes[cur];
+    old.el.classList.remove('is-active');
+    old.el.classList.add('is-leaving');
+    leaving = old;
+    cur = i; t = -220; snapNext = final; floor = 0;
+    // 自动模式下用户切页即继续播放（手动模式 paused 恒为 false）
+    if (paused) setPaused(false);
+    label.textContent = `${pad(cur + 1)} / ${pad(scenes.length)}　${scenes[cur].name}`;
+  }
+  function next() {
+    if (cur === scenes.length - 1) return;
+    const s = scenes[cur];
+    if (s.el.classList.contains('is-active') && t < s.end) snap(s);
+    go(cur + 1);
+  }
+  function prev() {
+    if (cur > 0) go(cur - 1, true);
+  }
+  function render() {
+    hint.textContent = !auto ? '点击 / → 下一页 · ← 上一页 · A 自动播放'
+      : paused ? '已暂停 · 空格 / 点击 继续' : '空格 / 点击 暂停 · ← → 切换 · A 手动模式';
+    modeBtn.setAttribute('aria-pressed', auto);
+  }
+  function setPaused(v) { paused = v; render(); }
+  function setAuto(v) {
+    auto = v; paused = false;
+    if (!auto) t = Math.max(Math.min(t, scenes[cur].end), floor);
+    render();
+  }
+
+  function tick(now) {
+    const dt = Math.min(now - last, 100);
+    last = now;
+    const s = scenes[cur];
+    if (!(auto && paused)) t += dt;
+    // 暂停也让切页间隙走完，新页不会停在 t < 0 的空白
+    else if (t < 0) t = Math.min(t + dt, 0);
+    if (!auto) t = Math.min(t, s.end);
+    if (t >= 0 && !s.el.classList.contains('is-active')) {
+      if (leaving) finishLeave();
+      // 未激活时过渡已关闭：此时绘制的状态不会产生动画
+      if (snapNext || RM) { floor = s.end; if (!auto) t = s.end; paint(s, true); }
+      else if (s.hook) s.hook(t, s.el);
+      snapNext = false;
+      void s.el.offsetWidth;
+      s.el.classList.add('is-active');
+    }
+    if (t >= 0) paint(s);
+    segs.forEach((b, i) => {
+      b.classList.toggle('cur', i === cur);
+      b.firstChild.style.setProperty('--p', i < cur ? 1 : i > cur ? 0 : clamp(t / (auto ? s.dur : s.end)));
+    });
+    if (auto && t >= s.dur) go(cur + 1);
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'a' || e.key === 'A') setAuto(!auto);
+    else if (e.code === 'Space') { e.preventDefault(); auto ? setPaused(!paused) : next(); }
+    else if (e.key === 'ArrowRight') auto ? go(cur + 1) : next();
+    else if (e.key === 'ArrowLeft') auto ? go(cur - 1) : prev();
+    else if (!auto && e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (!auto && e.key === 'PageUp') { e.preventDefault(); prev(); }
+  });
+  stage.addEventListener('click', () => auto ? setPaused(!paused) : next());
+  modeBtn.addEventListener('click', e => { e.stopPropagation(); setAuto(!auto); });
+
+  label.textContent = `01 / ${pad(scenes.length)}　${scenes[0].name}`;
+  render();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
