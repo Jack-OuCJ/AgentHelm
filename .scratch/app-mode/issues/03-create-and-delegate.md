@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 注册唯一 Dispatcher；02 App 角色模型绑定。
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 宿主请求与回执关联，验证能力、入口、主控、目录、可见性和有效参数。
 - [ ] 排队、失败、未知结果不误报运行，不重复创建，不静默回退 CLI。
