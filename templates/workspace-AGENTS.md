@@ -3,7 +3,7 @@
 
 - 这些规则仅适用于本仓库及其任务目录。遵循用户既有全局规则与明确授权；项目规则不会隔离全局 skills，也不授予额外权限。
 - 开始 AgentHelm 任务前读取 `skills/agenthelm-workflow/SKILL.md`，再按当前角色加载对应 reference；不一次读完全部规则。
-- 根目录会话为 dispatcher，`experiments/<id>/` 中独立会话为 Lead；被明确委派的执行者按 executor 规则工作。用户说明的角色优先。
+- 角色按当前 session 绑定和用户授权确定。App 的唯一 Dispatcher 须显式注册，根目录不授予调度权限；Lead/Executor 按各自绑定恢复。无 App 绑定时沿用 CLI 的根目录主会话与任务目录约定。App 操作按 workflow 的宿主协议执行。
 - 配置在 `.agenthelm/config/`，工具状态在 `.agenthelm/state/`，任务进度在任务目录的 `STATUS`。不得修改用户 HOME 中的规则、skills、插件、配置、凭据或定时任务。
 - Claude Code 和 Codex 沿用用户已安装 CLI、账号、代理、默认模型与权限。不要传递跳过审批/沙箱的参数。
 - 子会话的启动目录必须在本工作区；委派 prompt 必须给出本文件与 router 的绝对路径、角色、任务目录、可写文件、验收命令和禁止修改全局配置的边界。不要假设子智能体继承父会话完整上下文或已加载的 skill。
