@@ -3,7 +3,7 @@ import os
 from uuid import uuid4
 
 from _app_sessions import require_dispatcher, session_id, task_path, guarded_path, pending_writes
-from _models import resolve_app
+from _models import EXECUTOR_ROLES, ccd_agent, ccd_agent_path, resolve_app
 from _toml import loads
 from _workspace import CONFIG, ROOT, bootstrap
 
@@ -37,6 +37,13 @@ def model_parameters(owner, operation, role, payload):
     model = resolve_app(loads((CONFIG / 'roles.toml').read_text()), role, entry)
     effective = {field: model[field] for field in ('model', 'effort')}
     defaults = payload.get('defaults', {})
+    if entry == 'app.ccd' and operation == 'executor':
+        inherited = owner.get('actual', {})
+        for field in effective:
+            if effective[field] is None:
+                if not isinstance(inherited.get(field), str) or not inherited[field]:
+                    raise ValueError('CCD Executor inherits the bound Lead, whose actual ' + field + ' is unknown')
+                effective[field] = inherited[field]
     if any(value is None for value in effective.values()):
         if not isinstance(defaults, dict):
             raise ValueError('App defaults must include model, effort, source and evidence')
@@ -87,10 +94,18 @@ def prepare(state, identifier, operation, task, payload):
                 or task_binding.get('state') != 'running' or not task_binding.get('active')):
             raise ValueError('native Executor requires the bound running Lead session')
         role = payload.get('role', 'fact')
-        if role not in ('fact', 'hard', 'chore', 'writing', 'visual', 'simplify', 'aesthetic'):
+        if role not in EXECUTOR_ROLES:
             raise ValueError('invalid Executor role')
     entry = owner['entry']
     model, effective, defaults = model_parameters(owner, operation, role, payload)
+    agent = None
+    if operation == 'executor' and entry == 'app.ccd':
+        # CCD's Agent tool only takes model aliases, so the generated agent file pins the real IDs.
+        path = ccd_agent_path(role)
+        config = loads((CONFIG / 'roles.toml').read_text())
+        if not path.is_file() or path.read_text() != ccd_agent(config, role):
+            raise ValueError(f'CCD Executor agent {path} is missing or stale; run bin/models, then restart the Lead session')
+        agent = path.stem
     if operation == 'create':
         brief = guarded_path(task / 'README.md').read_text()
         prompt = bootstrap('lead', task, entry=entry) + '\n任务卡：\n' + brief
@@ -106,6 +121,13 @@ def prepare(state, identifier, operation, task, payload):
                                      if operation == 'create' else
                                      'Use the bound Lead native subagent facility and execute the brief.') +
                ' Keep cwd at task. Read back actual model and effort. Never substitute CLI or request arguments for evidence.'}
+    if agent:
+        request['subagent_type'] = agent
+        request['host_instructions'] = (
+            f'Use the bound Lead native Agent tool with subagent_type={agent} and no model argument; '
+            'the agent file pins model and effort. Execute the brief with cwd at task. Read back actual model and '
+            'effort from the subagent transcript; cwd evidence comes from the executed pwd output. '
+            'Never substitute CLI or request arguments for evidence.')
     state['requests'][request['id']] = request
     if operation == 'create':
         state['tasks'][key] = {'state': 'pending', 'request': request['id'], 'entry': entry,
@@ -170,6 +192,8 @@ def result(state, identifier, request_id, payload):
         required += ('native', 'parent_session')
         if payload.get('native') is not True or payload.get('parent_session') != identifier:
             raise ValueError('Executor must be a native subagent of its bound Lead')
+        if request.get('subagent_type'):
+            required += ('served_model',)
     if payload.get('executed') is not True:
         raise ValueError('first turn has not executed in task cwd')
     evidence = payload.get('evidence')
@@ -180,6 +204,11 @@ def result(state, identifier, request_id, payload):
     actual = {name: text(payload.get(name), 'actual ' + name) for name in ('model', 'effort')}
     if actual != request['effective_request']:
         raise ValueError('actual model/effort does not match resolved target App request')
+    if request.get('subagent_type'):
+        # CCD transcripts keep the [1m] variant in requestedModel but report the served base ID in message.model.
+        served = text(payload.get('served_model'), 'served model')
+        if served != actual['model'].removesuffix('[1m]'):
+            raise ValueError('served model does not match the requested CCD model')
     request['status'] = 'succeeded'
     request['receipt'] = payload
     binding = {'entry': request['entry'], 'capabilities': state['sessions'][identifier]['capabilities'],

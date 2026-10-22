@@ -238,5 +238,103 @@ class AppRequestTests(unittest.TestCase):
         self.assertIn('pending', self.prepare(ok=False).stderr)
 
 
+class CcdExecutorTests(unittest.TestCase):
+    tearDown = test_app_sessions.AppSessionTests.tearDown
+    run_cmd = test_app_sessions.AppSessionTests.run_cmd
+    app = test_app_sessions.AppSessionTests.app
+
+    def setUp(self):
+        test_app_sessions.AppSessionTests.setUp(self)
+        self.task = self.root / 'experiments/001-ccd'
+        (self.task / 'findings').mkdir(parents=True)
+        (self.task / 'README.md').write_text('# Task\n可写：findings；验收：检查报告。\n')
+        roles = self.root / '.agenthelm/config/roles.toml'
+        roles.write_text(roles.read_text() + '\n[roles.hard.app.ccd]\nmodel = "gateway/opus"\neffort = "low"\n')
+        self.run_cmd('bin/models')
+        self.app('register', '--entry', 'app.ccd', '--session', 'dispatch-1')
+        capabilities = {name: {'available': True, 'source': 'fake CCD inventory'} for name in
+                        ('create', 'read', 'wait', 'followup', 'model', 'effort',
+                         'verify_model', 'native_executor')}
+        capabilities['verify_model']['fields'] = ['model', 'effort']
+        capabilities['model']['values'] = ['gateway/opus', 'gateway/opus[1m]', 'gateway/lead']
+        capabilities['effort']['combinations'] = {'gateway/opus': ['low', 'high'], 'gateway/opus[1m]': ['low'],
+                                                  'gateway/lead': ['high']}
+        self.app('capabilities', '--session', 'dispatch-1', payload={
+            'entry': 'app.ccd', 'source': 'fake tool inventory', 'capabilities': capabilities})
+        lead = self.app('prepare', '--session', 'dispatch-1', '--operation', 'create', '--task', str(self.task),
+                        payload={'defaults': {'model': 'gateway/lead', 'effort': 'high',
+                                              'source': 'fake CCD settings', 'evidence': 'settings readback'}})
+        self.receive(lead, self.receipt(lead, 'lead-1', 'gateway/lead', 'high',
+                                        visible=True, independent=True))
+
+    def receipt(self, request, session, model, effort, **fields):
+        return {'request_id': request['id'], 'owner_epoch': request['owner_epoch'], 'entry': 'app.ccd',
+                'status': 'created', 'session': session, 'workspace': str(self.root), 'cwd': str(self.task),
+                'executed': True, 'model': model, 'effort': effort, **fields,
+                'evidence': {name: 'fake transcript readback: ' + name for name in
+                             ('session', 'workspace', 'cwd', 'visible', 'independent',
+                              'executed', 'model', 'effort', 'native', 'parent_session', 'served_model')}}
+
+    def receive(self, request, receipt, ok=True):
+        return self.app('result', '--session', request['caller_session'], '--request', request['id'],
+                        payload=receipt, ok=ok)
+
+    def executor(self, role, ok=True):
+        result = self.run_cmd('bin/run-executor', self.task, '--session', 'lead-1', '--role', role,
+                              input='只写 findings；检查报告。', ok=ok)
+        return json.loads(result.stdout) if ok else result
+
+    def test_configured_role_requests_its_generated_agent_and_exact_ids(self):
+        request = self.executor('hard')
+        self.assertEqual(request['subagent_type'], 'agenthelm-hard')
+        self.assertEqual(request['effective_request'], {'model': 'gateway/opus', 'effort': 'low'})
+        self.assertIn('subagent_type=agenthelm-hard and no model argument', request['host_instructions'])
+        for model, effort in (('gateway/lead', 'low'), ('gateway/opus', 'high'), ('opus', 'low')):
+            receipt = self.receipt(request, 'native-1', model, effort, native=True, parent_session='lead-1',
+                                   served_model='gateway/opus')
+            self.receive(request, receipt, ok=False)
+        receipt = self.receipt(request, 'native-1', 'gateway/opus', 'low', native=True, parent_session='lead-1')
+        self.assertIn('served model', self.receive(request, receipt, ok=False).stderr)
+        receipt['served_model'] = 'gateway/lead'
+        self.receive(request, receipt, ok=False)
+        receipt['served_model'] = 'gateway/opus'
+        self.receive(request, receipt)
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertEqual(shown['sessions']['native-1']['actual'], {'model': 'gateway/opus', 'effort': 'low'})
+
+    def test_1m_role_matches_requested_variant_and_served_base_model(self):
+        roles = self.root / '.agenthelm/config/roles.toml'
+        roles.write_text(roles.read_text() + '\n[roles.chore.app.ccd]\nmodel = "gateway/opus[1m]"\neffort = "low"\n')
+        self.run_cmd('bin/models')
+        agent = (self.root / '.claude/agents/agenthelm-chore.md').read_text()
+        self.assertIn('model: gateway/opus[1m]\neffort: low\n', agent)
+        request = self.executor('chore')
+        self.assertEqual(request['effective_request'], {'model': 'gateway/opus[1m]', 'effort': 'low'})
+        fields = dict(native=True, parent_session='lead-1')
+        for model, served in (('gateway/opus', 'gateway/opus'), ('gateway/opus[1m]', 'gateway/opus[1m]'),
+                              ('gateway/opus[1m]', 'gateway/lead')):
+            receipt = self.receipt(request, 'native-1', model, 'low', served_model=served, **fields)
+            self.receive(request, receipt, ok=False)
+        receipt = self.receipt(request, 'native-1', 'gateway/opus[1m]', 'low', served_model='gateway/opus', **fields)
+        self.receive(request, receipt)
+
+    def test_unconfigured_role_inherits_bound_lead_actual_values(self):
+        request = self.executor('chore')
+        self.assertEqual(request['subagent_type'], 'agenthelm-chore')
+        self.assertEqual(request['effective_request'], {'model': 'gateway/lead', 'effort': 'high'})
+        self.assertEqual(request['model_binding']['sources'], {'model': 'lead-inherit', 'effort': 'lead-inherit'})
+
+    def test_missing_or_stale_agent_file_stops_before_a_request_is_recorded(self):
+        agent = self.root / '.claude/agents/agenthelm-hard.md'
+        agent.write_text(agent.read_text().replace('effort: low', 'effort: high'))
+        self.assertIn('stale', self.executor('hard', ok=False).stderr)
+        agent.unlink()
+        self.assertIn('bin/models', self.executor('hard', ok=False).stderr)
+        requests = self.app('show', '--session', 'dispatch-1')['requests']
+        self.assertEqual([request['operation'] for request in requests.values()], ['create'])
+        self.run_cmd('bin/models')
+        self.executor('hard')
+
+
 if __name__ == '__main__':
     unittest.main()

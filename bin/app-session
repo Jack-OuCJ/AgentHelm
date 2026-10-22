@@ -5,7 +5,7 @@ import json
 import sys
 
 from _app_requests import prepare, result
-from _app_sessions import claim, finish, record_capabilities, register, release, show, transaction
+from _app_sessions import claim, finish, record_capabilities, register, release, resume, show, transaction
 
 
 def main():
@@ -32,6 +32,10 @@ def main():
     finishing = commands.add_parser('finish')
     finishing.add_argument('--session', required=True)
     finishing.add_argument('--task', required=True)
+    resuming = commands.add_parser('resume')
+    resuming.add_argument('--session', required=True)
+    resuming.add_argument('--task', required=True)
+    resuming.add_argument('--reason', required=True)
     args = parser.parse_args()
     payload = json.load(sys.stdin) if args.command in ('prepare', 'result', 'capabilities') else None
     with transaction(readonly=args.command == 'show') as state:
@@ -49,6 +53,8 @@ def main():
             output = claim(state, args.session, args.entry)
         elif args.command == 'finish':
             output = finish(state, args.session, args.task)
+        elif args.command == 'resume':
+            output = resume(state, args.session, args.task, args.reason)
         else:
             output = show(state, args.session)
     print(json.dumps(output, ensure_ascii=False))
