@@ -2,9 +2,9 @@
 
 **What to build:** App 内智能体按稳定步骤调用项目请求与宿主原生工具；维护者可区分离线通过、真实 Codex 能力和 CCD 接入缺口。
 
-**Blocked by:** 04 跟踪、主控交接与恢复；05 本机模型运行证据。
+**Blocked by:** 03 原生 Lead 创建与 Executor 委派；05 本机模型运行证据。
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Codex 规则覆盖独立聊天创建、首次发送、读取等待、实际模型验证和状态回写。
 - [ ] CCD 缺能力明确停止，不以深链接、手工发送或 CLI 冒充。

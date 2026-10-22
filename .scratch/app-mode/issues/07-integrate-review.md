@@ -2,7 +2,7 @@
 
 **What to build:** 全部切片在同一分支集成，通过 Matt 的 Standards 与 Spec 双轴审查，修复发现并提供可复用的操作说明和验收报告。
 
-**Blocked by:** 06 宿主执行规则与能力核查。
+**Blocked by:** 04 跟踪、主控交接与恢复；06 宿主执行规则与能力核查。
 
 **Status:** ready-for-agent
 
