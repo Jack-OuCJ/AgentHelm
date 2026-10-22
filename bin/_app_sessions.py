@@ -1,5 +1,6 @@
 """Workspace-local App bindings and serialized, atomic state transactions."""
 from contextlib import contextmanager
+from copy import deepcopy
 import fcntl
 import json
 import os
@@ -78,14 +79,43 @@ def validate_state(state):
             raise ValueError(f'damaged App state: {error}') from error
     for task, binding in state['tasks'].items():
         path = guarded_path(task)
-        if path.parent != ROOT / 'experiments' or not isinstance(binding, dict):
+        if (str(path) != task or path.parent != ROOT / 'experiments' or not isinstance(binding, dict)
+                or binding.get('entry') not in ENTRIES or type(binding.get('active')) is not bool
+                or any(type(binding[field]) is not int or binding[field] < 0 for field in
+                       ('observation_counter', 'observation_floor') if field in binding)
+                or ('history' in binding and not isinstance(binding['history'], list))):
             raise ValueError('damaged App state: invalid task binding')
+        if 'session' in binding and (not isinstance(binding['session'], str)
+                or binding['session'] not in state['sessions']
+                or state['sessions'][binding['session']]['entry'] != binding['entry']):
+            raise ValueError('damaged App state: unbound task session')
+    for identifier, request in state['requests'].items():
+        if (not isinstance(request, dict) or request.get('id') != identifier
+                or request.get('operation') not in ('create', 'executor', 'read', 'wait', 'followup')
+                or request.get('status') not in ('pending', 'queued', 'unknown', 'succeeded', 'failed')
+                or request.get('workspace') != str(ROOT) or request.get('entry') not in ENTRIES
+                or type(request.get('owner_epoch')) is not int or request['owner_epoch'] < 1
+                or not isinstance(request.get('task'), str)
+                or guarded_path(request['task']).parent != ROOT / 'experiments'):
+            raise ValueError('damaged App state: invalid host request')
     dispatcher = state.get('dispatcher')
     if dispatcher is not None:
         if (not isinstance(dispatcher, dict) or not isinstance(dispatcher.get('session'), str)
                 or dispatcher['session'] not in state['sessions'] or state['owner_epoch'] < 1
                 or dispatcher.get('entry') != state['sessions'][dispatcher['session']]['entry']):
             raise ValueError('damaged App state: invalid Dispatcher binding')
+    handoff = state.get('handoff')
+    if handoff is not None:
+        if (not isinstance(handoff, dict) or dispatcher is not None
+                or handoff.get('entry') not in ENTRIES
+                or type(handoff.get('owner_epoch')) is not int
+                or handoff.get('owner_epoch') != state['owner_epoch']
+                or not isinstance(handoff.get('from'), str) or not isinstance(handoff.get('to'), str)):
+            raise ValueError('damaged App state: invalid handoff')
+        session_id(handoff['from'])
+        session_id(handoff['to'])
+    if 'handoff_history' in state and not isinstance(state['handoff_history'], list):
+        raise ValueError('damaged App state: invalid handoff history')
     return state
 
 
@@ -143,10 +173,19 @@ def require_dispatcher(state, identifier):
     return state['sessions'][identifier]
 
 
+def pending_writes(state, task=None):
+    return [request for request in state['requests'].values()
+            if request['operation'] in ('create', 'executor', 'followup')
+            and request['status'] not in ('succeeded', 'failed')
+            and (task is None or request['task'] == str(task))]
+
+
 def register(state, identifier, entry):
     session_id(identifier)
     if entry not in ENTRIES:
         raise ValueError('unsupported App entry')
+    if state.get('handoff'):
+        raise ValueError('pending handoff must be claimed by its designated session')
     if state['dispatcher'] is not None and state['dispatcher'] != {'session': identifier, 'entry': entry}:
         raise ValueError('Dispatcher conflict: explicit handoff is required')
     binding = state['sessions'].get(identifier)
@@ -170,4 +209,74 @@ def record_capabilities(state, identifier, payload):
     validate_capabilities(capabilities)
     binding['capabilities'] = capabilities
     binding['capability_source'] = source
+    return binding
+
+
+def task_status(task):
+    path = guarded_path(task_path(task) / 'STATUS')
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return {'state': 'unknown', 'source': str(path), 'raw': None}
+    with os.fdopen(descriptor) as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('task STATUS must be a regular file')
+        raw = stream.read()
+    return {'state': raw.split('|', 1)[0].strip(), 'source': str(path), 'raw': raw}
+
+
+def show(state, identifier):
+    require_dispatcher(state, identifier)
+    output = deepcopy(state)
+    for task, binding in output['tasks'].items():
+        binding['task_status'] = task_status(task)
+    return output
+
+
+def release(state, identifier, target):
+    owner = require_dispatcher(state, identifier)
+    session_id(target)
+    if target == identifier:
+        raise ValueError('handoff target must be another session')
+    if pending_writes(state):
+        raise ValueError('handoff blocked by unresolved write request')
+    if target in state['sessions'] and state['sessions'][target]['entry'] != owner['entry']:
+        raise ValueError('cross-App handoff is not supported')
+    state['owner_epoch'] += 1
+    state['handoff'] = {'from': identifier, 'to': target, 'entry': owner['entry'],
+                        'owner_epoch': state['owner_epoch']}
+    state['dispatcher'] = None
+    return state
+
+
+def claim(state, identifier, entry):
+    session_id(identifier)
+    handoff = state.get('handoff')
+    if (not handoff or state['dispatcher'] is not None or handoff['to'] != identifier
+            or handoff['entry'] != entry):
+        raise ValueError('claim requires an explicit same-App handoff to this session')
+    binding = state['sessions'].get(identifier)
+    if binding is not None and binding['entry'] != entry:
+        raise ValueError('cross-App handoff is not supported')
+    state['sessions'].setdefault(identifier, {'entry': entry, 'capabilities': {}})
+    state['dispatcher'] = {'session': identifier, 'entry': entry}
+    state.setdefault('handoff_history', []).append(handoff)
+    del state['handoff']
+    return state
+
+
+def finish(state, identifier, task):
+    require_dispatcher(state, identifier)
+    task = task_path(task)
+    binding = state['tasks'].get(str(task), {})
+    if not binding.get('session'):
+        raise ValueError('finish requires a bound Lead')
+    if pending_writes(state, task):
+        raise ValueError('finish blocked by unresolved write request')
+    observed = task_status(task)
+    if observed['state'] != 'done':
+        raise ValueError('finish requires local task STATUS=done; session state is insufficient')
+    if binding['active']:
+        binding['active'] = False
+        binding.setdefault('history', []).append({'event': 'finished', 'task_status': observed})
     return binding
