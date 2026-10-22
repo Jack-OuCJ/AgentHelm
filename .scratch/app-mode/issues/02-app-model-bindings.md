@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] 按字段解析角色覆盖、App 默认、原生默认，default 不继承 Dispatcher 或 CLI。
 - [ ] 明确拒绝非法配置，保留现有 CLI 行为。
