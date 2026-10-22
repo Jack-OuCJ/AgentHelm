@@ -71,6 +71,41 @@ def runtime_entry(entry=None, session=None, task=None):
     return None
 
 
+def restored_session(session=None, entry=None, task=None):
+    """Read App role ownership for restoration; never register a new session."""
+    from _app_sessions import load_state, session_id, task_path
+    state = load_state()
+    if entry is not None and entry not in ('app.codex', 'app.ccd', 'cli.claude', 'cli.codex'):
+        raise ValueError('unknown runtime entry')
+    if session is not None:
+        session_id(session)
+    binding = state['sessions'].get(session)
+    if binding:
+        if entry is not None and entry != binding['entry']:
+            raise ValueError('entry conflicts with bound session')
+        if state['dispatcher'] and state['dispatcher']['session'] == session:
+            if task is not None:
+                raise ValueError('Dispatcher session cannot restore a Lead task')
+            role, bound_task = 'dispatcher', None
+        elif binding.get('role') in ('lead', 'executor'):
+            role = binding['role']
+            bound_task = task_path(binding['task'])
+            if task is not None and task != bound_task:
+                raise ValueError('session belongs to a different task')
+        else:
+            role, bound_task = '只读观察者（无 Dispatcher 权限）', None
+            if task is not None:
+                raise ValueError('session is not the bound Lead or Executor')
+        return {'entry': binding['entry'], 'session': session, 'role': role, 'task': bound_task}
+    environment, _ = runtime_environment(entry)
+    if (environment == 'app' or (task is not None and str(task) in state['tasks'])):
+        raise ValueError('unregistered App session: verify native identity and bind it explicitly')
+    if task is None and (state['dispatcher'] or state.get('handoff')):
+        return {'entry': entry, 'session': None,
+                'role': '只读观察者（未绑定，无 Dispatcher 权限）', 'task': None}
+    return None
+
+
 def runtime_environment(entry=None, session=None):
     if session is not None:
         entry = runtime_entry(entry, session)
@@ -89,12 +124,18 @@ def runtime_environment(entry=None, session=None):
 
 
 def bootstrap(role, task=None, entry=None, session=None):
-    environment, instructions = runtime_environment(entry, session)
+    if entry is None and session is not None:
+        entry = runtime_entry(session=session)
+    environment, instructions = runtime_environment(entry)
     return (f'工作区根目录：{ROOT}\n当前角色：{role}\n'
             f'开始前读取 {ROOT / "AGENTS.md"} 和 '
             f'{ROOT / "skills/agenthelm-workflow/SKILL.md"}，按角色加载对应规则。\n'
+            + f'运行入口：{entry or ("app（未绑定）" if environment == "app" else environment)}\n'
+            + f'会话标识：{session or "待宿主确认"}\n'
             + (f'任务目录：{task}\n' if task else '')
             + f'当前运行环境：{environment}；环境说明来源：{instructions}\n'
             + instructions.read_text().strip() + '\n'
+            + (f'App 宿主操作前读取 {ROOT / "skills/agenthelm-workflow/references/app-host.md"}。\n'
+               if environment == 'app' else '')
             + '沿用用户既有全局规则和权限；只操作当前任务明确授权的文件。\n'
             + '不得修改用户 HOME 中的规则、skills、插件、配置或凭据；不得绕过权限审批。\n')

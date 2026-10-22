@@ -24,14 +24,20 @@ try:
     if not (entry and entry.startswith('app.')) and args.app_params != '{}':
         parser.error('--app-params requires a bound App session')
     if entry and entry.startswith('app.'):
-        from _app_sessions import transaction
+        from _app_sessions import transaction, load_state
         from _app_requests import prepare
         parameters = json.loads(args.app_params)
         if not isinstance(parameters, dict):
             parser.error('App parameters must be a JSON map')
         parameters.update(role=args.role, brief=brief)
-        with transaction() as state:
-            request = prepare(state, args.session, 'executor', task, parameters)
+        if args.print_only:
+            request = prepare(load_state(), args.session, 'executor', task, parameters)
+            request.pop('id')
+            request.update(preview=True, executable=False, status='preview',
+                           host_instructions='Preview only. Do not execute or submit a receipt; no request was recorded.')
+        else:
+            with transaction() as state:
+                request = prepare(state, args.session, 'executor', task, parameters)
         print(json.dumps(request, ensure_ascii=False))
         raise SystemExit(0)
 except (ValueError, OSError) as error:

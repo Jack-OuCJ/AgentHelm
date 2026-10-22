@@ -58,11 +58,13 @@ class RuntimeRulesTests(unittest.TestCase):
                     executor = self.run_cmd('bin/run-executor', task, '--print', input='只读任务目录。').stdout
                     lead = self.run_cmd('bin/spawn-lead', task).stdout
                 contexts = [
-                    self.run_cmd('bin/dispatch', '--print').stdout,
+                    self.run_cmd('bin/dispatch', '--print', *(['--session', 'dispatcher'] if environment == 'app' else [])).stdout,
                     executor,
-                    self.run_cmd('bin/lead-reload', task, 'resume').stdout,
-                    self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd': str(self.root)})).stdout,
-                    self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd': str(task)})).stdout,
+                    self.run_cmd('bin/lead-reload', task, 'resume', *(['--session', 'lead'] if environment == 'app' else [])).stdout,
+                    self.run_cmd('bin/lead-watch-start', input=json.dumps({
+                        'cwd': str(self.root), **({'session_id': 'dispatcher'} if environment == 'app' else {})})).stdout,
+                    self.run_cmd('bin/lead-watch-start', input=json.dumps({
+                        'cwd': str(task), **({'session_id': 'lead'} if environment == 'app' else {})})).stdout,
                 ]
                 if environment == 'cli-herdr':
                     commands = [json.loads(row) for row in self.log.read_text().splitlines()]

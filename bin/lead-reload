@@ -2,16 +2,25 @@
 """Print task handoff context without requiring a multiplexer."""
 import argparse
 from pathlib import Path
-from _workspace import task_directory, bootstrap
+from _workspace import task_directory, bootstrap, restored_session
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('task_dir')
 parser.add_argument('source', nargs='?', default='startup')
 parser.add_argument('count', nargs='?', type=int, default=0)
+parser.add_argument('--entry', choices=('app.codex', 'app.ccd', 'cli.claude', 'cli.codex'))
+parser.add_argument('--session')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 task = task_directory(args.task_dir)
-print(bootstrap('lead', task))
+try:
+    context = restored_session(args.session, args.entry, task)
+except (ValueError, OSError) as error:
+    parser.error(str(error))
+if context:
+    print(bootstrap(context['role'], task, entry=context['entry'], session=context['session']))
+else:
+    print(bootstrap('lead', task, entry=args.entry))
 print(f'## Task context ({args.source}): {task.name}')
 print('## STATUS')
 status = task / 'STATUS'

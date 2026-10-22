@@ -34,6 +34,24 @@ Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动�
 
 没有 Herdr 时将 `.agenthelm/config/env` 改为 `cli-plain`，`spawn-lead` 会打印交接提示而不创建会话。
 
+## 在 Codex Desktop 或 CCD 中使用
+
+App 协议与 Herdr 可以共存，已有会话按自身 entry/session 绑定恢复，不必改整个工作区的 env。先由当前聊天的智能体核对原生会话 ID 和项目路径，再将用户指定的聊天注册为唯一 Dispatcher：
+
+```sh
+./bin/dispatch --entry app.codex --session REAL_SESSION_ID
+```
+
+`--print` 只读预览，不注册、不启动 CLI。已有 App 主控时，根目录 CLI 主控也会报冲突；通过显式 release/claim 交接。CCD 使用 `app.ccd`，但当前原生 create 能力尚未确认，自动创建应明确报缺口。
+
+按角色编辑项目 `roles.toml` 的 App 模型/强度后，用 `bin/models resolve lead --entry app.codex` 查看请求绑定。default 需要目标 App 默认来源；当前 Dispatcher 的模型不等于新聊天默认。没有可靠默认证据时应报告缺口，或由用户配置显式角色 model/effort。
+
+获准创建 Lead 后，智能体运行 `new-task` 或 `spawn-lead` 并传 `--session`、必要 `--app-params`，取得结构化请求；接着调用原生工具创建同项目 local 独立聊天，验证可见性、任务实际动作和生效参数，再用 `app-session result` 回写。脚本本身不会调用聊天工具。完整步骤与回执见 [App 宿主协议](skills/agenthelm-workflow/references/app-host.md)。
+
+Lead 委派使用原生子代理；`run-executor --print` 只输出不可执行的预览，不保存待执行请求。`codex-session-evidence` 只读精确会话及轮次的实际模型/强度，不能证明可见性、任务动作或默认来源。读取、等待、追加均按请求/回执执行；人工调整后先重新观察。
+
+本地协议与离线验收已实现；[宿主能力记录](claudedocs/2026-10-22-app-host-capabilities.md) 单列真实验证和缺口。当前 Codex 独立 Lead 创建闭环仍待真实验收；不能把离线测试通过称为已接通。完成后停止活跃跟踪并保留聊天，没有常驻 watcher。
+
 ## 会话与规则如何组合
 
 主会话 → 任务卡 → Lead → 明确范围的 executor → 验收与结论。文件是持久交接载体，Herdr 提供会话容器。每个角色仍需按需加载 skill，不会自动继承父会话所有上下文。
@@ -48,7 +66,7 @@ Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动�
 
 `bin/spawn-lead`、`bin/dispatch` 和 `bin/run-executor` 都会显式传递根规则、路由和角色路径。原生子代理也需在委派中写出这些信息；仅在项目目录启动不代表 skill 正文已加载。
 
-启动与上下文恢复提示会按 `.agenthelm/config/env` 注入对应的 `rules/env-*.md` 正文。手动开启的会话通过工作流入口按相同映射读取；配置文件不存在时使用 `cli-plain`，未知值会报错，生效说明缺失会提示运行 `bin/install-rules`。Dispatcher 分派任务、Lead 分层执行时读取 `rules/claude-global.md`；Executor 读取 `rules/executor-agents.md`。
+启动与上下文恢复先按实际 session 绑定选择 entry；App 使用 `rules/env-app.md`，无绑定的 CLI 再按 `.agenthelm/config/env` 注入对应 `rules/env-*.md` 正文。手动开启的会话通过工作流入口按相同映射读取；配置文件不存在时使用 `cli-plain`，未知值会报错，生效说明缺失会提示运行 `bin/install-rules`。Dispatcher 分派任务、Lead 分层执行时读取 `rules/claude-global.md`；Executor 读取 `rules/executor-agents.md`。
 
 ## 模型分配
 
@@ -123,7 +141,7 @@ python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-
 
 工作区配置和任务内容被 Git 忽略。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
 
-协作、执行者、环境和研究规则的来源在 templates。修改模板后运行 `bin/install-rules`，更新本工作区的 `rules/claude-global.md`、`rules/executor-agents.md`、三份 `rules/env-*.md`、`rules/research-workflow.md` 和根目录 `rules-extra.md`，并同步根目录入口。初始化时生成全部环境说明，运行时按当前 env 选择一份；修改模板后须同步才会影响后续加载。配置示例初始化、任务卡生成、规则校验和测试仍可读取 templates。
+协作、执行者、环境和研究规则的来源在 templates。修改模板后运行 `bin/install-rules`，更新本工作区的 `rules/claude-global.md`、`rules/executor-agents.md`、三份 `rules/env-*.md`、`rules/research-workflow.md` 和根目录 `rules-extra.md`，并同步根目录入口。初始化时生成全部环境说明，运行时按会话绑定优先、无绑定再按 env 选择一份；修改模板后须同步才会影响后续加载。配置示例初始化、任务卡生成、规则校验和测试仍可读取 templates。
 
 整体移动 checkout 后，脚本通过自身位置、项目 SessionStart 钩子通过会话项目目录识别新根目录，配置与技能链接保留相对关系。`.agenthelm/config/install-dir` 相对于该配置文件所在目录。委派提示中的绝对路径在运行时重新计算，不固化到入口配置。全局配置基线和历史恢复快照属于原始证据，保留其中的历史路径；第三方技能中的容器、系统工具路径按各自平台语义使用。
 
