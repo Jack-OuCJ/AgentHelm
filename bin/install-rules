@@ -3,7 +3,7 @@
 from _workspace import ROOT, CONFIG, owned, write
 import subprocess
 
-for directory in ('experiments', 'cards', 'reports', 'rules'):
+for directory in ('experiments', 'rules'):
     owned(ROOT / directory).mkdir(exist_ok=True)
 write(CONFIG / 'install-dir', '../..\n')
 for source, destination in (('claude-global.md', 'rules/claude-global.md'),

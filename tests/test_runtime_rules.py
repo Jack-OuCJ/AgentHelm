@@ -13,6 +13,12 @@ class RuntimeRulesTests(unittest.TestCase):
     def test_environment_context_reaches_all_roles_and_restore_paths(self):
         task = self.root / 'experiments/001-environment'
         task.mkdir()
+        project_summary, task_summary = 'Project memory for every Dispatcher', 'Task memory for every Lead'
+        test_workspace.write_note(self.root, 'memory/runtime-project.md', summary=project_summary,
+                                  body='Project memory body is read on demand')
+        test_workspace.write_note(self.root, 'experiments/001-environment/memory/runtime-task.md',
+                                  summary=task_summary, body='Task memory body is read on demand')
+        self.run_cmd('bin/kb', 'index')
         environments = ('cli-herdr', 'cli-plain', 'app')
         for environment in environments:
             with self.subTest(environment=environment):
@@ -71,7 +77,8 @@ class RuntimeRulesTests(unittest.TestCase):
                     lead = [row['argv'][-1] for row in commands
                             if row['argv'][:2] == ['agent', 'prompt']][-1]
                 contexts.append(lead)
-                for context in contexts:
+                roles = ('dispatcher', 'executor', 'lead', 'dispatcher', 'lead', 'lead')
+                for role, context in zip(roles, contexts):
                     self.assertIn(f'当前运行环境：{environment}', context)
                     self.assertIn(str(instructions), context)
                     self.assertIn(expected, context)
@@ -81,6 +88,10 @@ class RuntimeRulesTests(unittest.TestCase):
                         if other != environment:
                             other_instructions = self.root / 'rules' / f'env-{other}.md'
                             self.assertNotIn(other_instructions.read_text().strip(), context)
+                    # Dispatcher sees the project catalog, Lead adds its task, Executor inherits neither.
+                    self.assertEqual(project_summary in context, role != 'executor', (role, context))
+                    self.assertEqual(task_summary in context, role == 'lead', (role, context))
+                    self.assertNotIn('memory body is read on demand', context)
 
     def test_missing_env_defaults_to_plain_without_launching_agents(self):
         (self.root / '.agenthelm/config/env').unlink()

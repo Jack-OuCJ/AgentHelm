@@ -128,4 +128,4 @@ Dispatcher 可以在运行中等待原生事件并处理完成、失败和需要
 
 先验证两端关键原生能力，再实现会话入口与调度绑定、兼容的模型解析、创建和跟踪、交接恢复，最后分别验收 CCD 与 Codex App。各端独立报告通过项和缺口，不以某一端可用推断另一端可用。
 
-相关决策：[ADR 0001](../docs/adr/0001-app-lead-sessions.md)。相关术语：[GLOSSARY](../GLOSSARY.md)。
+相关决策：[ADR 0001](../adr/0001-app-lead-sessions.md)。相关术语：[GLOSSARY](../../GLOSSARY.md)。

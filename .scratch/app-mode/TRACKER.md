@@ -2,8 +2,8 @@
 
 未发现已配置的外部 tracker；本轮使用 to-tickets 支持的本地文件方式，不修改全局配置。需要永久 tracker 配置时由用户另行运行 /setup-matt-pocock-skills。
 
-规格：../../claudedocs/2026-10-22-app-mode-spec.md。
-架构：../../claudedocs/2026-10-22-app-mode-design.md；../../docs/adr/0001-app-lead-sessions.md。
+规格：[App 模式规格](../../docs/design/2026-10-22-app-mode-spec.md)。
+架构：[App 模式设计](../../docs/design/2026-10-22-app-mode-design.md)；[ADR 0001](../../docs/adr/0001-app-lead-sessions.md)。
 
 状态：ready-for-agent、in-progress、done、blocked。只有依赖全部 done 的任务可领取。勾选所有验收项、记录测试和提交后置 done；真实宿主测试单独记录，不能用离线通过替代。
 
@@ -31,4 +31,4 @@
 
 ## 交付结果
 
-01—07 全部完成代码与离线验收。完整测试112/112；Matt双轴审查最终无未解决发现。真实独立Lead创建、多模型分派、CCD创建与App默认取源的验收边界见 [验收记录](../../claudedocs/2026-10-22-app-mode-validation.md)。7个临时worktree已清理，未推送。
+01—07 全部完成代码与离线验收。完整测试112/112；Matt双轴审查最终无未解决发现。真实独立Lead创建、多模型分派、CCD创建与App默认取源的验收边界见 [验收记录](../../docs/validation/2026-10-22-app-mode-validation.md)。7个临时worktree已清理，未推送。

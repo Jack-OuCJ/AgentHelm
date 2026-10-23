@@ -30,17 +30,27 @@ class PortabilityTests(unittest.TestCase):
     def test_moved_workspace_runs_hooks_dispatch_tasks_models_and_maintenance(self):
         (self.root / '.agenthelm/config/env').write_text('cli-plain\n')
         self.run_cmd('bin/new-task', 'move', input='# Test\n- id: <task-id>\n- question: Move\n')
+        dependencies = json.loads(self.run_cmd('bin/kb', 'memory', 'fingerprint',
+                                               'experiments/001-move/README.md').stdout)
+        test_workspace.write_note(self.root, 'experiments/001-move/memory/portable-decision.md',
+                                  kind='finding', summary='Saved portable decision',
+                                  sources=['experiments/001-move/README.md'], dependencies=dependencies,
+                                  body='Portable note body is read on demand')
+        self.run_cmd('bin/kb', 'index')
         original = self.root
         self.root = self.base / '移动工作区 with spaces'
         original.rename(self.root)
         task = self.root / 'experiments/001-move'
-        (task / 'memory').mkdir()
-        (task / 'memory/MEMORY.md').write_text('Saved portable decision\n')
+        self.assertNotIn(str(original), (task / 'memory/MEMORY.md').read_text())
         hook_before = (self.root / '.claude/settings.json').read_text()
         self.assertNotIn(str(original), hook_before)
         self.assertIn(str(self.root), self.run_hook(self.root, self.root))
         self.assertIn('Saved portable decision', self.run_hook(task / 'findings', task))
         self.assertIn('Saved portable decision', self.run_hook(task / 'findings'))
+        self.assertNotIn('Portable note body is read on demand', self.run_hook(task / 'findings'))
+        self.assertIn('Portable note body is read on demand', self.run_cmd(
+            'bin/kb', 'memory', 'read', task / 'memory/portable-decision.md', cwd=self.base).stdout)
+        self.run_cmd('bin/kb', 'memory', 'check', cwd=self.base)
         self.assertEqual(self.run_hook(self.home, self.root), '')
         self.assertEqual(self.run_hook(self.home), '')
         dispatcher = self.run_cmd('bin/dispatch', '--print', cwd=self.base).stdout

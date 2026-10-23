@@ -27,8 +27,8 @@
 - Time and cost limits: <stated by the user, or "open: Lead confirms after the pilot">
 - Hardware: see `.agenthelm/config/local.md`. Network: <yes / no>. Lead role: <lead / lead_important>
 
-## Existing evidence (grep INDEX.md; "none" if none)
-- <card IDs or task IDs with line>
+## Existing evidence (consult INDEX.md and memory indexes; "none" if none)
+- <task IDs, document or note paths; check applicability and sources before reuse>
 
 ## Known pitfalls
 - <traps, versions, data issues the user mentioned; "none" if none>
@@ -53,7 +53,7 @@ User reply: <verbatim>
 
 ## Execution
 - Real runs go to `results.jsonl`; raw output stays at the recorded artifact paths.
-- Delegated exploration writes `findings/<topic>-<executor>.md` with `file:line` or URL per claim.
-- Long-lived notes (user decisions, pitfalls, conventions) go to `memory/`, one note per file, indexed in `memory/MEMORY.md`.
+- Delegated exploration writes `findings/<topic>-<executor>.md` with `file:line` or URL per claim; finished reader deliverables go in task `artifacts/`.
+- Cross-task lessons go in project `memory/`; task-only recovery notes go in task `memory/`, following `rules-extra.md`. Edit note sources, then generate the `MEMORY.md` indexes with `bin/kb index`; read matching notes on demand.
 
 <!-- Conclusion: add "## Conclusion (YYYY-MM-DD)" with "- **Tendency**:" and "- **Confidence**:" lines when done (format in AGENTS.md, workflow step 5). -->

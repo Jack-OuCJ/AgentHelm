@@ -11,4 +11,4 @@
 - [x] 每张任务记录结论、测试与提交，工作树清理且用户原文件保留。
 - [x] 不推送，不修改 HOME 配置，不启动常驻服务。
 
-验收：完整离线112/112，审查修复定向3/3，21文件Python3.10语法与diff检查通过；Standards0、Spec原1项P2经e2b9d23修复后0未解决。7个临时worktree已清理。真实App链路与旧数据lint边界见claudedocs验收记录，不冒充原生全链路通过。
+验收：完整离线112/112，审查修复定向3/3，21文件Python3.10语法与diff检查通过；Standards0、Spec原1项P2经e2b9d23修复后0未解决。7个临时worktree已清理。真实 App 链路与旧数据 lint 边界见 [App 模式验收记录](../../../docs/validation/2026-10-22-app-mode-validation.md)，不冒充原生全链路通过。

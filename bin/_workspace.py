@@ -138,4 +138,14 @@ def bootstrap(role, task=None, entry=None, session=None):
             + (f'App 宿主操作前读取 {ROOT / "skills/agenthelm-workflow/references/app-host.md"}。\n'
                if environment == 'app' else '')
             + '沿用用户既有全局规则和权限；只操作当前任务明确授权的文件。\n'
-            + '不得修改用户 HOME 中的规则、skills、插件、配置或凭据；不得绕过权限审批。\n')
+            + '不得修改用户 HOME 中的规则、skills、插件、配置或凭据；不得绕过权限审批。\n'
+            + (memory_context(task if role == 'lead' else None) if role in ('dispatcher', 'lead') else ''))
+
+
+def memory_context(task):
+    """Memory catalog for a Dispatcher or Lead; failures stay diagnostics, never startup errors."""
+    try:
+        from _memory import context  # imported at call time: _memory imports this module
+        return context(task)
+    except Exception as error:  # identity and STATUS restoration must not depend on memory health
+        return f'## 记忆索引\n诊断：记忆目录不可用（{type(error).__name__}: {error}）；身份与 STATUS 恢复继续。\n'

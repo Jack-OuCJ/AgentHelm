@@ -1,6 +1,6 @@
 # 瑞士风格动画演示：翻页控制规格
 
-适用于 `claudedocs/` 下所有瑞士风格动画 HTML（agenthelm-intro、metagpt-harness、helpflow-deep-dive、funcsea-architecture、atoms-architecture）。用户已确认，2026-10-21。
+适用于对应任务 `artifacts/` 中的瑞士风格动画 HTML（agenthelm-intro、metagpt-harness、helpflow-deep-dive、funcsea-architecture、atoms-architecture）。用户已确认，2026-10-21。
 
 ## 模式
 
