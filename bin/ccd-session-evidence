@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Read one explicit CCD prompt (or one complete native-agent log); never modify source evidence."""
+import argparse
+from collections import Counter
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import stat
+import tempfile
+
+APP_DIRECTORIES = ('Library/Application Support/Claude-3p', 'Library/Application Support/Claude')
+GATEWAY = '.claude-code-router/app-data/usage.sqlite'
+
+
+def identifier(value, field, pattern=r'[A-Za-z0-9][A-Za-z0-9_-]{0,255}'):
+    if not isinstance(value, str) or not re.fullmatch(pattern, value):
+        raise ValueError(f'{field} must be a plain identifier')
+    return value
+
+
+def text(record, field):
+    value = record.get(field)
+    if not isinstance(value, str) or not value.strip() or any(ord(c) < 32 for c in value):
+        raise ValueError(f'missing or invalid evidence field: {field}')
+    return value
+
+
+def json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def invalid_constant(value):
+    raise ValueError('non-JSON constant')
+
+
+def parse_object(data):
+    try:
+        record = json.loads(data, object_pairs_hook=json_object, parse_constant=invalid_constant)
+        if not isinstance(record, dict):
+            raise ValueError
+        return record
+    except (ValueError, UnicodeError, RecursionError):
+        raise ValueError('invalid JSON object in evidence') from None
+
+
+def open_directory(path):
+    """Traverse absolute paths through directory descriptors without following links."""
+    path = Path(path).absolute()
+    if '..' in path.parts:
+        raise ValueError('parent traversal in evidence path')
+    descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def snapshot(path, newline=False):
+    directory = open_directory(path.parent)
+    try:
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
+    with os.fdopen(descriptor, 'rb') as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError('evidence must be a regular file')
+        data = stream.read(before.st_size)
+        after = os.fstat(stream.fileno())
+        if (len(data) != before.st_size or
+                (before.st_size, before.st_mtime_ns, before.st_ctime_ns) !=
+                (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            raise ValueError('evidence changed while reading; retry capture')
+    if newline and not data.endswith(b'\n'):
+        raise ValueError('incomplete transcript: trailing newline required')
+    return data, {'path': str(path), 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+
+
+def find_files(root, depth, name):
+    """Search only the documented directory depth, rejecting symlink directories."""
+    try:
+        descriptor = open_directory(root)
+    except FileNotFoundError:
+        return []
+    try:
+        matches = []
+        for entry in os.listdir(descriptor):
+            info = os.stat(entry, dir_fd=descriptor, follow_symlinks=False)
+            path = root / entry
+            if stat.S_ISLNK(info.st_mode):
+                raise ValueError('symbolic link in evidence search directory')
+            if depth and stat.S_ISDIR(info.st_mode):
+                matches.extend(find_files(path, depth - 1, name))
+            elif not depth and entry == name:
+                matches.append(path)
+        return matches
+    finally:
+        os.close(descriptor)
+
+
+def single(paths, what):
+    if len(paths) != 1:
+        raise ValueError(f'expected exactly one {what}, found {len(paths)}')
+    return paths[0]
+
+
+def within_workspace(cwd, workspace):
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        raise ValueError('cwd must be an absolute workspace path')
+    try:
+        Path(cwd).resolve().relative_to(workspace)
+    except ValueError:
+        raise ValueError('cwd is outside the requested workspace') from None
+
+
+def timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            raise ValueError
+        return parsed.astimezone(timezone.utc)
+    except (AttributeError, ValueError, TypeError):
+        raise ValueError('invalid timezone-aware evidence timestamp') from None
+
+
+def records(data):
+    for number, line in enumerate(data.splitlines(), 1):
+        try:
+            record = parse_object(line)
+            text(record, 'type')
+        except ValueError:
+            raise ValueError(f'invalid JSON record at line {number}') from None
+        yield number, record
+
+
+def collect_turn(data, prompt_id, cwd, cli, workspace, captured_at, agent=None):
+    current = None
+    seen = Counter()
+    rows = []
+    cwd_line = None
+    started = ended = None
+    closed = False
+    for number, record in records(data):
+        if record['type'] == 'user' and prompt_id is not None:
+            content = record.get('message', {})
+            content = content.get('content') if isinstance(content, dict) else None
+            tool_reply = (isinstance(content, list) and bool(content)
+                          and all(isinstance(item, dict) and item.get('type') == 'tool_result'
+                                  for item in content))
+            tool_reply = tool_reply or ('toolUseResult' in record and content is None)
+            if not tool_reply and not record.get('promptId'):
+                raise ValueError('user turn has no promptId; cannot establish turn boundary')
+        if record['type'] == 'user' and record.get('promptId'):
+            new = identifier(record['promptId'], 'promptId')
+            if prompt_id is not None and new != current:
+                if current == prompt_id:
+                    closed = True
+                    ended = timestamp(record.get('timestamp'))
+                elif new == prompt_id:
+                    if closed:
+                        raise ValueError('requested prompt appears in disconnected turns')
+                    started = timestamp(record.get('timestamp'))
+            current = new
+        if prompt_id is not None and current != prompt_id:
+            continue
+        if record['type'] == 'assistant':
+            if record.get('sessionId') != cli or record.get('entrypoint') != 'claude-desktop-3p':
+                raise ValueError('assistant identity or Desktop origin does not match')
+            if agent is not None and (record.get('agentId') != agent or record.get('isSidechain') is not True):
+                raise ValueError('native agent identity does not match')
+            within_workspace(record.get('cwd'), workspace)
+            message = record.get('message')
+            if not isinstance(message, dict):
+                raise ValueError('invalid assistant message')
+            model, effort, served = text(record, 'requestedModel'), text(record, 'effort'), text(message, 'model')
+            if effort not in ('low', 'medium', 'high', 'xhigh', 'max'):
+                raise ValueError('invalid effort')
+            if served != model.removesuffix('[1m]'):
+                raise ValueError('served model does not match requested model')
+            at = timestamp(record.get('timestamp'))
+            if started is None:
+                started = at  # Agent-log scope has no host prompt boundary.
+            if at < started or (rows and at < timestamp(rows[-1][1]['timestamp'])):
+                raise ValueError('non-monotonic turn timestamps')
+            seen[(model, effort, served)] += 1
+            rows.append((number, record))
+        result = record.get('toolUseResult')
+        if (cwd is not None and cwd_line is None and isinstance(result, dict)
+                and isinstance(result.get('stdout'), str) and result['stdout'].split('\n', 1)[0] == cwd):
+            cwd_line = number
+    if not rows:
+        raise ValueError('no assistant records for the requested turn')
+    if len(seen) != 1:
+        raise ValueError('turn mixes model or effort settings')
+    ended = ended or captured_at
+    if ended < timestamp(rows[-1][1]['timestamp']):
+        raise ValueError('turn boundary precedes assistant evidence')
+    (model, effort, served), count = next(iter(seen.items()))
+    result = {'scope': 'prompt' if prompt_id is not None else 'agent_log',
+              'requested_model': model, 'effort': effort, 'served_model': served,
+              'turn': {'prompt_id': prompt_id, 'first_line': rows[0][0], 'last_line': rows[-1][0],
+                       'assistant_records': count, 'first_request_ref': text(rows[0][1], 'requestRef'),
+                       'started_at': started.isoformat(), 'ended_at': ended.isoformat(),
+                       'end_source': 'next_prompt' if closed else 'capture_time'}}
+    if cwd is not None:
+        if cwd_line is None:
+            raise ValueError('no tool stdout in the requested turn starts with the expected cwd')
+        result['cwd'] = {'path': cwd, 'line': cwd_line}
+    return result
+
+
+def gateway_sidecars(path):
+    observed = {}
+    for suffix in ('-wal', '-journal'):
+        try:
+            sidecar, source = snapshot(Path(str(path) + suffix))
+        except FileNotFoundError:
+            observed[suffix] = None
+            continue
+        if sidecar:
+            raise ValueError('gateway has an active journal/WAL; retry after checkpoint')
+        observed[suffix] = source
+    return observed
+
+
+def gateway(home, started, ended):
+    path = home / GATEWAY
+    # Best-effort quiescent capture, not a transactional snapshot of a live writer.
+    # SQLite opens only our copy, never source sidecars.
+    before = gateway_sidecars(path)
+    data, source = snapshot(path)
+    if gateway_sidecars(path) != before:
+        raise ValueError('gateway sidecars changed during capture; retry after checkpoint')
+    with tempfile.TemporaryDirectory(prefix='ah-gateway-') as directory:
+        copied = Path(directory) / 'usage.sqlite'
+        copied.write_bytes(data)
+        connection = sqlite3.connect(copied.as_uri() + '?mode=ro&immutable=1', uri=True)
+        try:
+            rows = connection.execute(
+                'select provider, model, count(*), sum(status_code = 200) from usage_events '
+                'where julianday(created_at) >= julianday(?) and julianday(created_at) < julianday(?) '
+                'group by 1, 2 order by 1, 2', (started, ended)).fetchall()
+        finally:
+            connection.close()
+    return {'source': source, 'window': [started, ended], 'end_exclusive': True,
+            'attribution': 'time-window-only; includes concurrent sessions; not exhaustive session evidence',
+            'counts': [{'provider': p, 'model': m, 'requests': n, 'ok': ok} for p, m, n, ok in rows]}
+
+
+def evidence(session, prompt_id=None, agent=None, cwd=None, with_gateway=False, workspace=None):
+    identifier(session, 'session', r'local_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}')
+    if (prompt_id is None) == (agent is None):
+        raise ValueError('pass exactly one of --prompt-id or --agent')
+    workspace = Path(workspace or Path(__file__).resolve().parents[1]).resolve()
+    if not workspace.is_dir():
+        raise ValueError('workspace must be an existing directory')
+    home = Path.home().absolute()
+    matches = [path for directory in APP_DIRECTORIES
+               for path in find_files(home / directory / 'claude-code-sessions', 2, session + '.json')]
+    record_path = single(matches, 'CCD session record')
+    raw, record_source = snapshot(record_path)
+    record = parse_object(raw)
+    if record.get('sessionId') != session:
+        raise ValueError('session record ID does not match requested session')
+    cli = identifier(record.get('cliSessionId'), 'cliSessionId')
+    session_cwd = text(record, 'cwd')
+    within_workspace(session_cwd, workspace)
+    if cwd is not None:
+        within_workspace(cwd, workspace)
+    transcript = single(find_files(home / '.claude/projects', 1, cli + '.jsonl'), 'session transcript')
+    result = {'session': session, 'cli_session': cli, 'workspace': str(workspace),
+              'session_cwd': session_cwd, 'session_record': record_source}
+    if agent is not None:
+        transcript = transcript.with_suffix('') / 'subagents' / f'agent-{identifier(agent, "agent")}.jsonl'
+        meta_raw, meta_source = snapshot(transcript.with_suffix('.meta.json'))
+        meta = parse_object(meta_raw)
+        result['agent'] = {'id': agent, 'agent_type': text(meta, 'agentType'), 'source': meta_source}
+    else:
+        identifier(prompt_id, 'prompt-id')
+    data, result['transcript'] = snapshot(transcript, newline=True)
+    result.update(collect_turn(data, prompt_id, cwd, cli, workspace, datetime.now(timezone.utc), agent))
+    if with_gateway:
+        if agent is not None:
+            raise ValueError('--gateway requires a host --prompt-id boundary')
+        result['gateway'] = gateway(home, result['turn']['started_at'], result['turn']['ended_at'])
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--session', required=True, help='CCD local_ session ID')
+    parser.add_argument('--workspace', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--prompt-id', help='one explicit host promptId; never selects latest implicitly')
+    parser.add_argument('--agent', help='complete native-agent log, not a single prompt; settings must be uniform')
+    parser.add_argument('--cwd', help='require stdout whose first line equals this workspace path; not proof of action')
+    parser.add_argument('--gateway', action='store_true', help='time-window counts only, not session attribution')
+    args = parser.parse_args()
+    try:
+        result = evidence(args.session, args.prompt_id, args.agent, args.cwd, args.gateway, args.workspace)
+    except (ValueError, KeyError, OSError, sqlite3.Error) as error:
+        raise SystemExit('ccd-session-evidence: ' + str(error)) from None
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    main()

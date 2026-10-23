@@ -26,6 +26,17 @@ class AppSessionTests(unittest.TestCase):
         self.assertEqual(result['owner_epoch'], 1)
         self.assertEqual((self.root / '.agenthelm/config/env').read_text(), original)
 
+    def test_full_output_and_compact_ownership_are_consistent(self):
+        full = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1', '--full')
+        self.assertEqual(full, self.app('show', '--session', 'dispatch-1'))
+        compact = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        self.assertNotIn('tasks', compact)
+        released = self.app('release', '--session', 'dispatch-1', '--to', 'dispatch-2', '--full')
+        self.assertIsNone(released['dispatcher'])
+        self.assertIn('tasks', released)
+        claimed = self.app('claim', '--session', 'dispatch-2', '--entry', 'app.codex', '--full')
+        self.assertEqual(claimed, self.app('show', '--session', 'dispatch-2'))
+
     def test_ccd_capability_gaps_keep_individual_sources(self):
         self.app('register', '--entry', 'app.ccd', '--session', 'ccd-1')
         payload = {'entry': 'app.ccd', 'source': 'host tool inventory', 'capabilities': {
@@ -38,9 +49,11 @@ class AppSessionTests(unittest.TestCase):
         self.assertEqual(binding['capability_source'], 'host tool inventory')
 
     def test_repeated_registration_is_idempotent_and_cannot_take_ownership(self):
-        first = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        first = self.app('show', '--session', 'dispatch-1')
         again = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
-        self.assertEqual(first, again)
+        self.assertEqual(again, {'owner_epoch': 1, 'dispatcher': first['dispatcher'],
+                                 'session': first['sessions']['dispatch-1']})
         conflict = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-2', ok=False)
         self.assertIn('conflict', conflict.stderr)
         self.app('register', '--entry', 'app.ccd', '--session', 'dispatch-1', ok=False)
@@ -70,7 +83,8 @@ class AppSessionTests(unittest.TestCase):
                          ['capabilities'], {})
 
     def test_damaged_state_with_escaped_task_is_not_read_or_replaced(self):
-        state = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        state = self.app('show', '--session', 'dispatch-1')
         state['tasks'][str(self.home)] = {'session': 'foreign'}
         target = self.root / '.agenthelm/state/app-sessions.json'
         target.write_text(json.dumps(state))
@@ -80,7 +94,8 @@ class AppSessionTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), before)
 
     def test_damaged_state_is_reported_without_automatic_reset(self):
-        valid = self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        self.app('register', '--entry', 'app.codex', '--session', 'dispatch-1')
+        valid = self.app('show', '--session', 'dispatch-1')
         target = self.root / '.agenthelm/state/app-sessions.json'
         invalid_capability = json.loads(json.dumps(valid))
         invalid_capability['sessions']['dispatch-1']['capabilities'] = {'read': {'available': 'yes'}}
