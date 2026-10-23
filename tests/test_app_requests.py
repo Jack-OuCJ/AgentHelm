@@ -45,6 +45,132 @@ class AppRequestTests(unittest.TestCase):
         return self.app('result', '--session', request['caller_session'], '--request', request['id'],
                         payload=self.receipt(request) if receipt is None else receipt, ok=ok)
 
+    def identity_receipt(self, request, session='lead-1'):
+        return {'request_id': request['id'], 'owner_epoch': request['owner_epoch'],
+                'entry': request['entry'], 'status': 'created', 'session': session,
+                'workspace': str(self.root), 'cwd': str(self.task), 'visible': True,
+                'independent': True, 'evidence_level': 'identity', 'runtime_verified': False,
+                'evidence': {name: 'native identity readback: ' + name for name in
+                             ('session', 'workspace', 'cwd', 'visible', 'independent')}}
+
+    def test_identity_binding_starts_lead_without_actions_or_runtime_evidence(self):
+        self.capabilities['verify_model'] = {'available': False, 'source': 'runtime evidence unavailable'}
+        self.app('capabilities', '--session', 'dispatch-1', payload={
+            'entry': 'app.codex', 'source': 'inventory', 'capabilities': self.capabilities})
+        request = self.prepare()
+        self.receive(request, self.identity_receipt(request))
+        state = self.app('show', '--session', 'dispatch-1')
+        for binding in (state['sessions']['lead-1'], state['tasks'][str(self.task)]):
+            self.assertEqual(binding['evidence_level'], 'identity')
+            self.assertIs(binding['runtime_verified'], False)
+            self.assertEqual(binding['requested'], request['effective_request'])
+            self.assertNotIn('actual', binding)
+            self.assertNotIn('configured', binding)
+        self.assertEqual(state['tasks'][str(self.task)]['state'], 'running')
+        self.run_cmd('bin/lead-reload', self.task, '--session', 'lead-1')
+        self.prepare('executor', session='lead-1', payload={**self.parameters, 'brief': 'write report'})
+        self.assertFalse(self.log.exists())
+
+    def test_identity_receipt_still_requires_native_identity_and_cannot_claim_runtime(self):
+        request = self.prepare()
+        receipt = self.identity_receipt(request)
+        for changes in ({'session': 'dispatch-1'}, {'cwd': str(self.root)}, {'visible': False},
+                        {'independent': False}, {'runtime_verified': True}, {'executed': True},
+                        {'actual': request['effective_request']}, {'configured': request['effective_request']},
+                        {'model': 'desktop-model'}, {'effort': 'high'}, {'evidence': {}}):
+            with self.subTest(changes=changes):
+                self.receive(request, dict(receipt, **changes), ok=False)
+        self.receive(request, receipt)
+
+    def test_identity_bound_lead_finishes_and_resumes_without_runtime_verification(self):
+        created = self.prepare()
+        self.receive(created, self.identity_receipt(created))
+        (self.task / 'STATUS').write_text('done | task | accepted output')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        self.app('resume', '--session', 'lead-1', '--task', str(self.task), '--reason', 'continue task')
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertTrue(shown['tasks'][str(self.task)]['active'])
+        self.assertEqual(shown['tasks'][str(self.task)]['session'], 'lead-1')
+        self.assertFalse(shown['sessions']['lead-1']['runtime_verified'])
+        self.run_cmd('bin/lead-reload', self.task, '--session', 'lead-1')
+
+    def test_executor_finishes_before_parent_verification_without_own_binding(self):
+        request = self.prepare()
+        self.receive(request, self.identity_receipt(request))
+        executor = self.prepare('executor', session='lead-1',
+                                payload={**self.parameters, 'brief': 'Write findings/result.txt and verify it.'})
+        self.assertIn('without a startup handshake', executor['host_instructions'])
+        before = self.app('show', '--session', 'dispatch-1')
+        self.assertNotIn('native-finished', before['sessions'])
+        # Simulate the native task action before the parent has registered the Executor.
+        artifact = self.task / 'findings/result.txt'
+        subprocess.run(['python3', '-c',
+                        'from pathlib import Path; Path("findings/result.txt").write_text("verified result")'],
+                       cwd=self.task, check=True)
+        self.assertEqual(artifact.read_text(), 'verified result')
+        receipt = self.receipt(executor, session='native-finished')
+        receipt.update(native=True, parent_session='lead-1')
+        completion = {key: value for key, value in receipt.items() if key not in ('model', 'effort')}
+        completion.update(status='completed', runtime_verified=False)
+        completion['evidence'] = dict(completion['evidence'], completed=str(artifact))
+        self.receive(executor, dict(completion, executed=False), ok=False)
+        self.receive(executor, dict(completion, parent_session='wrong'), ok=False)
+        self.receive(executor, completion)
+        pending = self.app('show', '--session', 'dispatch-1')
+        self.assertEqual(pending['requests'][executor['id']]['status'], 'completed')
+        self.assertNotIn('native-finished', pending['sessions'])
+        state_path = self.root / '.agenthelm/state/app-sessions.json'
+        for damaged_completion in (None, [], {'status': 'completed', 'request_id': executor['id']}):
+            damaged = json.loads(json.dumps(pending))
+            damaged['requests'][executor['id']]['completion'] = damaged_completion
+            state_path.write_text(json.dumps(damaged))
+            self.app('show', '--session', 'dispatch-1', ok=False)
+        state_path.write_text(json.dumps(pending))
+        self.receive(executor, dict(receipt, session='different-child'), ok=False)
+        self.receive(executor, dict(completion, status='unknown'), ok=False)
+        (self.task / 'STATUS').write_text('done | task | accepted result')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        self.receive(executor, dict(receipt, model='wrong'), ok=False)
+        self.assertEqual(artifact.read_text(), 'verified result')
+        self.receive(executor, receipt)
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertTrue(shown['sessions']['native-finished']['runtime_verified'])
+        self.assertFalse(shown['sessions']['lead-1']['runtime_verified'])
+
+    def test_identity_bound_lead_accepts_followup_then_independent_runtime_observation(self):
+        created = self.prepare()
+        self.receive(created, self.identity_receipt(created))
+        read = self.prepare('read', payload={})
+        observation = {'request_id': read['id'], 'owner_epoch': read['owner_epoch'], 'entry': 'app.codex',
+                       'status': 'observed', 'session': 'lead-1', 'workspace': str(self.root),
+                       'cwd': str(self.task), 'state': 'working', 'revision': 'first', 'cursor': 'read:first',
+                       'context': 'Running the authorized task.', 'source': 'native read',
+                       'evidence': {name: 'native read: ' + name for name in
+                                    ('session', 'workspace', 'cwd', 'state', 'revision', 'cursor', 'context',
+                                     'model', 'effort')}}
+        self.receive(read, observation)
+        followup = self.prepare('followup', payload={'brief': 'continue', 'observation': read['id'],
+                                'revision': 'first', 'cursor': 'read:first'})
+        self.assertEqual(followup['effective_request_source'], 'requested')
+        self.receive(followup, {'request_id': followup['id'], 'owner_epoch': followup['owner_epoch'],
+                     'entry': 'app.codex', 'status': 'sent', 'session': 'lead-1',
+                     'workspace': str(self.root), 'cwd': str(self.task), 'sent': True,
+                     'model': 'desktop-model', 'effort': 'high', 'source': 'native send',
+                     'revalidated_revision': 'first', 'revalidated_cursor': 'read:first',
+                     'evidence': {name: 'native send or preserved requested value: ' + name for name in
+                                  ('session', 'workspace', 'cwd', 'sent', 'model', 'effort',
+                                   'revalidated_revision', 'revalidated_cursor')}})
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertFalse(shown['sessions']['lead-1']['runtime_verified'])
+        runtime = self.prepare('read', payload={})
+        observed = dict(observation, request_id=runtime['id'], revision='second', cursor='read:second',
+                        actual={'model': 'desktop-model', 'effort': 'high'})
+        self.receive(runtime, observed, ok=False)
+        self.receive(runtime, dict(observed, runtime_verified=True))
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertTrue(shown['sessions']['lead-1']['runtime_verified'])
+        self.assertEqual(shown['sessions']['lead-1']['actual'], created['effective_request'])
+
     def test_host_receipt_binds_a_real_visible_executed_lead_and_effective_model(self):
         request = self.prepare()
         self.receive(request)
@@ -56,6 +182,31 @@ class AppRequestTests(unittest.TestCase):
         self.assertEqual(state['sessions']['lead-1']['entry'], 'app.codex')
         self.assertEqual(state['requests'][request['id']]['status'], 'succeeded')
         self.assertIn('already', self.receive(request, ok=False).stderr)
+
+    def test_legacy_actual_bindings_load_without_new_metadata(self):
+        created = self.prepare()
+        self.receive(created)
+        state = self.app('show', '--session', 'dispatch-1')
+        for binding in (state['sessions']['lead-1'], state['tasks'][str(self.task)]):
+            del binding['evidence_level']
+            del binding['runtime_verified']
+        (self.root / '.agenthelm/state/app-sessions.json').write_text(json.dumps(state))
+        self.app('show', '--session', 'dispatch-1')
+        self.prepare('read', payload={})
+        self.prepare('executor', session='lead-1', payload={**self.parameters, 'brief': 'inspect'})
+
+    def test_codex_create_and_executor_reject_settings_evidence(self):
+        request = self.prepare()
+        receipt = self.receipt(request)
+        self.receive(request, dict(receipt, evidence_level='settings', executed=False,
+                                   runtime_verified=False), ok=False)
+        self.receive(request, receipt)
+        executor = self.prepare('executor', session='lead-1', payload={**self.parameters, 'brief': 'inspect'})
+        receipt = self.receipt(executor, session='native-1')
+        receipt.update(native=True, parent_session='lead-1')
+        self.receive(executor, dict(receipt, evidence_level='settings', executed=False,
+                                   runtime_verified=False), ok=False)
+        self.receive(executor, receipt)
 
     def test_bad_receipts_keep_pending_and_block_duplicate_creation(self):
         request = self.prepare()
@@ -91,7 +242,7 @@ class AppRequestTests(unittest.TestCase):
         self.assertNotEqual(request['id'], retry['id'])
 
     def test_capability_and_default_evidence_gaps_stop_before_pending_write(self):
-        for capability in ('create', 'read', 'wait', 'followup', 'model', 'effort', 'verify_model'):
+        for capability in ('create', 'read', 'wait', 'followup', 'model', 'effort'):
             capabilities = json.loads(json.dumps(self.capabilities))
             capabilities[capability]['available'] = False
             self.app('capabilities', '--session', 'dispatch-1', payload={
@@ -334,6 +485,190 @@ class CcdExecutorTests(unittest.TestCase):
         self.assertEqual([request['operation'] for request in requests.values()], ['create'])
         self.run_cmd('bin/models')
         self.executor('hard')
+
+
+class CcdSettingsTests(unittest.TestCase):
+    tearDown = CcdExecutorTests.tearDown
+    run_cmd = CcdExecutorTests.run_cmd
+    app = CcdExecutorTests.app
+    receipt = CcdExecutorTests.receipt
+    receive = CcdExecutorTests.receive
+    executor = CcdExecutorTests.executor
+    prepare = AppRequestTests.prepare
+
+    def setUp(self):
+        CcdExecutorTests.setUp(self)
+        self.task = self.root / 'experiments/002-settings'
+        self.task.mkdir()
+        (self.task / 'README.md').write_text('# Formal task: inspect findings')
+        self.parameters = {'defaults': {'model': 'gateway/lead', 'effort': 'high',
+                                       'source': 'CCD get_session', 'evidence': 'native readback'}}
+        self.created = self.prepare()
+
+    def settings_receipt(self):
+        receipt = self.receipt(self.created, 'settings-lead', 'gateway/lead', 'high',
+                               visible=True, independent=True, executed=False,
+                               evidence_level='settings', runtime_verified=False)
+        receipt['evidence'] = {name: 'CCD get_session readback: ' + name for name in
+                               ('session', 'workspace', 'cwd', 'visible', 'independent', 'model', 'effort')}
+        return receipt
+
+    def bind(self):
+        self.receive(self.created, self.settings_receipt())
+
+    def test_ccd_identity_binding_can_dispatch_and_inherit_before_settings_or_runtime_readback(self):
+        identity = AppRequestTests.identity_receipt(self, self.created, 'settings-lead')
+        self.receive(self.created, identity)
+        self.run_cmd('bin/lead-reload', self.task, '--session', 'settings-lead')
+        read = self.prepare('read', payload={})
+        observation = self.observation(read)
+        self.receive(read, observation)
+        followup = self.prepare('followup', payload={'brief': self.created['prompt'],
+                                'observation': read['id'], 'revision': observation['revision'],
+                                'cursor': observation['cursor']})
+        self.assertEqual(followup['effective_request_source'], 'requested')
+        executor = self.prepare('executor', session='settings-lead', payload={'role': 'chore', 'brief': 'inspect'})
+        self.assertEqual(executor['effective_request'], self.created['effective_request'])
+        self.assertIn('without a startup handshake', executor['host_instructions'])
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertEqual(shown['sessions']['settings-lead']['evidence_level'], 'identity')
+        self.assertFalse(shown['sessions']['settings-lead']['runtime_verified'])
+
+    def assert_settings_binding(self):
+        shown = self.app('show', '--session', 'dispatch-1')
+        for binding in (shown['sessions']['settings-lead'], shown['tasks'][str(self.task)]):
+            self.assertEqual(binding['configured'], {'model': 'gateway/lead', 'effort': 'high'})
+            self.assertEqual(binding['evidence_level'], 'settings')
+            self.assertIs(binding['runtime_verified'], False)
+            self.assertNotIn('actual', binding)
+        return shown
+
+    def observation(self, request, **fields):
+        return {'request_id': request['id'], 'owner_epoch': request['owner_epoch'], 'entry': 'app.ccd',
+                'status': 'observed', 'session': 'settings-lead', 'workspace': str(self.root),
+                'cwd': str(self.task), 'state': 'idle', 'revision': request['id'],
+                'cursor': 'read:' + request['id'], 'context': 'Placeholder finished; formal task not sent.',
+                'source': 'CCD native observation', **fields,
+                'evidence': {name: 'CCD native readback: ' + name for name in
+                             ('session', 'workspace', 'cwd', 'state', 'revision', 'cursor', 'context',
+                              'model', 'effort')}}
+
+    def test_unknown_create_can_bind_settings_without_execution_or_duplicate_session(self):
+        self.receive(self.created, {'request_id': self.created['id'], 'owner_epoch': 1,
+                     'entry': 'app.ccd', 'status': 'unknown', 'source': 'CCD create',
+                     'evidence': 'Session exists; runtime proof unavailable'})
+        self.prepare(ok=False)
+        self.bind()
+        shown = self.assert_settings_binding()
+        self.assertEqual(shown['requests'][self.created['id']]['status'], 'succeeded')
+        self.assertIn('read/followup', self.created['host_instructions'])
+        self.prepare(ok=False)
+        self.run_cmd('bin/lead-reload', self.task, '--session', 'settings-lead')
+        self.assertFalse(self.log.exists())
+
+    def test_invalid_settings_receipts_leave_request_pending(self):
+        valid = self.settings_receipt()
+        for change in ({'model': 'wrong'}, {'effort': 'low'}, {'executed': True}, {'executed': None},
+                       {'runtime_verified': True}, {'runtime_verified': None}, {'evidence': {}},
+                       {'session': 'dispatch-1'}, {'session': ''}, {'session': 'lead-1'},
+                       {'visible': False}, {'independent': False}, {'cwd': str(self.root)},
+                       {'workspace': str(self.home)}, {'actual': valid['model']},
+                       {'served_model': 'gateway/lead'}, {'evidence_level': 'typo'}):
+            with self.subTest(change=change):
+                self.receive(self.created, dict(valid, **change), ok=False)
+        for field in valid['evidence']:
+            evidence = dict(valid['evidence'])
+            del evidence[field]
+            self.receive(self.created, dict(valid, evidence=evidence), ok=False)
+        strict = dict(valid)
+        del strict['evidence_level']
+        self.receive(self.created, strict, ok=False)
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertEqual(shown['requests'][self.created['id']]['status'], 'pending')
+        self.bind()
+
+    def test_bound_settings_support_read_followup_and_strict_executor_inheritance(self):
+        self.bind()
+        read = self.prepare('read', payload={})
+        observation = self.observation(read)
+        self.receive(read, observation)
+        self.assert_settings_binding()
+        followup = self.prepare('followup', payload={'brief': self.created['prompt'],
+                                'observation': read['id'], 'revision': observation['revision'],
+                                'cursor': observation['cursor']})
+        self.assertEqual(followup['effective_request_source'], 'configured')
+        self.assertEqual(followup['effective_request'], self.created['effective_request'])
+        sent = {'request_id': followup['id'], 'owner_epoch': 1, 'entry': 'app.ccd', 'status': 'sent',
+                'session': 'settings-lead', 'workspace': str(self.root), 'cwd': str(self.task),
+                'sent': True, 'model': 'gateway/lead', 'effort': 'high', 'source': 'CCD SendMessage',
+                'revalidated_revision': observation['revision'], 'revalidated_cursor': observation['cursor'],
+                'evidence': {name: 'native readback: ' + name for name in
+                             ('session', 'workspace', 'cwd', 'sent', 'model', 'effort',
+                              'revalidated_revision', 'revalidated_cursor')}}
+        self.receive(followup, dict(sent, runtime_verified=True), ok=False)
+        self.receive(followup, sent)
+        self.assert_settings_binding()
+        executor = self.prepare('executor', session='settings-lead', payload={'role': 'chore', 'brief': 'inspect'})
+        self.assertEqual(executor['effective_request'], self.created['effective_request'])
+        receipt = self.receipt(executor, 'native-settings-child', 'gateway/lead', 'high',
+                               native=True, parent_session='settings-lead', served_model='gateway/lead')
+        self.receive(executor, dict(receipt, evidence_level='settings', executed=False,
+                                   runtime_verified=False), ok=False)
+        self.receive(executor, dict(receipt, executed=False), ok=False)
+        self.receive(executor, receipt)
+        shown = self.assert_settings_binding()
+        self.assertTrue(shown['sessions']['native-settings-child']['runtime_verified'])
+        self.assertEqual(shown['sessions']['native-settings-child']['actual'], executor['effective_request'])
+        (self.task / 'STATUS').write_text('done | task | verified')
+        self.app('finish', '--session', 'dispatch-1', '--task', str(self.task))
+        self.app('resume', '--session', 'settings-lead', '--task', str(self.task), '--reason', 'continue')
+        self.assert_settings_binding()
+
+    def test_observation_does_not_implicitly_upgrade_settings_to_actual(self):
+        self.bind()
+        read = self.prepare('read', payload={})
+        values = {'model': 'gateway/lead', 'effort': 'high'}
+        for fields in ({'actual': values}, {'actual': values, 'runtime_verified': False},
+                       {'configured': values}, {'configured': values, 'runtime_verified': True},
+                       {'configured': values, 'actual': values, 'runtime_verified': True},
+                       {'runtime_verified': True}):
+            self.receive(read, self.observation(read, **fields), ok=False)
+        self.receive(read, self.observation(read, configured=values, runtime_verified=False))
+        self.assert_settings_binding()
+        runtime = self.prepare('read', payload={})
+        self.receive(runtime, self.observation(runtime, actual=values, runtime_verified=True))
+        shown = self.app('show', '--session', 'dispatch-1')
+        for binding in (shown['sessions']['settings-lead'], shown['tasks'][str(self.task)]):
+            self.assertEqual(binding['actual'], values)
+            self.assertNotIn('configured', binding)
+            self.assertTrue(binding['runtime_verified'])
+            self.assertEqual(binding['evidence_level'], 'runtime')
+
+    def test_configured_manual_changes_drive_followup_without_runtime_claim(self):
+        self.bind()
+        read = self.prepare('read', payload={})
+        selected = {'model': 'gateway/opus', 'effort': 'low'}
+        payload = self.observation(read, configured=selected, runtime_verified=False)
+        self.receive(read, payload)
+        followup = self.prepare('followup', payload={'brief': 'new task', 'observation': read['id'],
+                                'revision': payload['revision'], 'cursor': payload['cursor']})
+        self.assertEqual(followup['effective_request'], selected)
+        shown = self.app('show', '--session', 'dispatch-1')
+        self.assertNotIn('actual', shown['sessions']['settings-lead'])
+
+    def test_state_schema_rejects_settings_masquerading_as_runtime(self):
+        self.bind()
+        valid = self.app('show', '--session', 'dispatch-1')
+        path = self.root / '.agenthelm/state/app-sessions.json'
+        for change in ({'actual': {'model': 'gateway/lead', 'effort': 'high'}},
+                       {'runtime_verified': True}, {'configured': {'model': 'gateway/lead'}},
+                       {'role': 'executor'}, {'entry': 'app.codex'}):
+            damaged = json.loads(json.dumps(valid))
+            damaged['sessions']['settings-lead'].update(change)
+            path.write_text(json.dumps(damaged))
+            self.assertIn('damaged App state', self.app('show', '--session', 'dispatch-1', ok=False).stderr)
+        path.write_text(json.dumps(valid))
+        self.assert_settings_binding()
 
 
 if __name__ == '__main__':

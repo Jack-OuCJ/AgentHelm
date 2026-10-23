@@ -61,6 +61,35 @@ def validate_capabilities(capabilities):
             raise ValueError(f'capability {name} requires available boolean and individual source')
 
 
+def validate_model_evidence(binding):
+    # Legacy runtime bindings have only actual; new metadata must not relabel settings as runtime.
+    if not any(field in binding for field in ('configured', 'evidence_level', 'runtime_verified')):
+        return
+    level = binding.get('evidence_level')
+    if level == 'identity':
+        values = binding.get('requested')
+        if (binding.get('runtime_verified') is not False
+                or binding.get('role', 'lead') != 'lead'
+                or any(field in binding for field in ('actual', 'configured'))
+                or not isinstance(values, dict)
+                or any(not isinstance(values.get(name), str) or not values[name].strip()
+                       for name in ('model', 'effort'))):
+            raise ValueError('damaged App state: invalid identity binding')
+        return
+    settings_only = level == 'settings'
+    field = 'configured' if settings_only else 'actual'
+    values = binding.get(field)
+    if (level not in ('settings', 'runtime')
+            or binding.get('runtime_verified') is not (not settings_only)
+            or not isinstance(values, dict)
+            or any(not isinstance(values.get(name), str) or not values[name].strip()
+                   for name in ('model', 'effort'))
+            or ('actual' if settings_only else 'configured') in binding
+            or (settings_only and (binding.get('entry') != 'app.ccd'
+                                  or binding.get('role', 'lead') != 'lead'))):
+        raise ValueError('damaged App state: invalid model evidence')
+
+
 def validate_state(state):
     if (not isinstance(state, dict) or state.get('version') != 1
             or type(state.get('version')) is not int or 'dispatcher' not in state
@@ -73,6 +102,7 @@ def validate_state(state):
         if (not isinstance(binding, dict) or binding.get('entry') not in ENTRIES
                 or not isinstance(binding.get('capabilities'), dict)):
             raise ValueError('damaged App state: invalid session binding')
+        validate_model_evidence(binding)
         try:
             validate_capabilities(binding['capabilities'])
         except ValueError as error:
@@ -85,6 +115,7 @@ def validate_state(state):
                        ('observation_counter', 'observation_floor') if field in binding)
                 or ('history' in binding and not isinstance(binding['history'], list))):
             raise ValueError('damaged App state: invalid task binding')
+        validate_model_evidence(binding)
         if 'session' in binding and (not isinstance(binding['session'], str)
                 or binding['session'] not in state['sessions']
                 or state['sessions'][binding['session']]['entry'] != binding['entry']):
@@ -92,12 +123,22 @@ def validate_state(state):
     for identifier, request in state['requests'].items():
         if (not isinstance(request, dict) or request.get('id') != identifier
                 or request.get('operation') not in ('create', 'executor', 'read', 'wait', 'followup')
-                or request.get('status') not in ('pending', 'queued', 'unknown', 'succeeded', 'failed')
+                or request.get('status') not in ('pending', 'queued', 'unknown', 'completed', 'succeeded', 'failed')
+                or (request.get('status') == 'completed' and request.get('operation') != 'executor')
                 or request.get('workspace') != str(ROOT) or request.get('entry') not in ENTRIES
                 or type(request.get('owner_epoch')) is not int or request['owner_epoch'] < 1
                 or not isinstance(request.get('task'), str)
                 or guarded_path(request['task']).parent != ROOT / 'experiments'):
             raise ValueError('damaged App state: invalid host request')
+        completion = request.get('completion')
+        if request['status'] == 'completed' and completion is None:
+            raise ValueError('damaged App state: missing Executor completion')
+        if completion is not None:
+            if (not isinstance(completion, dict) or request['operation'] != 'executor'
+                    or completion.get('status') != 'completed'
+                    or completion.get('request_id') != identifier):
+                raise ValueError('damaged App state: invalid Executor completion')
+            session_id(completion.get('session'))
     dispatcher = state.get('dispatcher')
     if dispatcher is not None:
         if (not isinstance(dispatcher, dict) or not isinstance(dispatcher.get('session'), str)
@@ -176,7 +217,7 @@ def require_dispatcher(state, identifier):
 def pending_writes(state, task=None):
     return [request for request in state['requests'].values()
             if request['operation'] in ('create', 'executor', 'followup')
-            and request['status'] not in ('succeeded', 'failed')
+            and request['status'] not in ('succeeded', 'failed', 'completed')
             and (task is None or request['task'] == str(task))]
 
 
