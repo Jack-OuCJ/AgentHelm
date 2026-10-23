@@ -147,6 +147,49 @@ class AppHostTests(unittest.TestCase):
         self.assertEqual(self.app('show', '--session', 'desktop-1')['dispatcher']['session'], 'desktop-1')
         self.assertFalse(self.log.exists())
 
+    def test_bound_roles_restore_only_their_memory_and_bad_notes_do_not_block_identity(self):
+        self.bind_lead()
+        (self.task / 'STATUS').write_text('running | 001-app | memory restore | \n')
+        write_note = test_app_sessions.test_workspace.write_note
+        write_note(self.root, 'memory/app-project.md', summary='App project memory catalog',
+                   body='App project body stays unread')
+        task_note = write_note(self.root, 'experiments/001-app/memory/app-task.md',
+                               summary='App task memory catalog', body='App task body stays unread')
+        self.run_cmd('bin/kb', 'index')
+        request = self.app('prepare', '--session', 'lead', '--operation', 'executor', '--task', self.task,
+                           payload={'brief': '只读任务目录', 'defaults': {'model': 'native-model', 'effort': 'high',
+                                                                      'source': 'fake settings', 'evidence': 'readback'}})
+        self.assertNotIn('App project memory catalog', request['prompt'])
+        self.assertNotIn('App task memory catalog', request['prompt'])
+        self.app('result', '--session', 'lead', '--request', request['id'], payload={
+            'request_id': request['id'], 'owner_epoch': 1, 'entry': 'app.codex', 'status': 'created',
+            'session': 'executor', 'workspace': str(self.root), 'cwd': str(self.task), 'native': True,
+            'parent_session': 'lead', 'executed': True, 'model': 'native-model', 'effort': 'high',
+            'evidence': {name: 'fake native observation' for name in
+                         ('session', 'workspace', 'cwd', 'native', 'parent_session', 'executed', 'model', 'effort')}})
+        views = {
+            'dispatcher': self.run_cmd('bin/lead-watch-start', input=json.dumps({
+                'cwd': str(self.root), 'session_id': 'owner'})).stdout,
+            'lead': self.run_cmd('bin/lead-reload', self.task, 'resume', '--session', 'lead').stdout,
+            'lead hook': self.run_cmd('bin/lead-watch-start', input=json.dumps({
+                'cwd': str(self.task), 'session_id': 'lead', 'source': 'startup'})).stdout,
+            'executor': self.run_cmd('bin/lead-watch-start', input=json.dumps({
+                'cwd': str(self.task), 'session_id': 'executor', 'source': 'startup'})).stdout}
+        self.assertIn('当前角色：dispatcher', views['dispatcher'])
+        self.assertIn('当前角色：executor', views['executor'])
+        for name, output in views.items():
+            self.assertEqual('App project memory catalog' in output, name != 'executor', name)
+            self.assertEqual('App task memory catalog' in output, name.startswith('lead'), name)
+            self.assertNotIn('body stays unread', output)
+        task_note.write_text(task_note.read_text().replace('scope: task', 'scope task'))
+        broken = self.run_cmd('bin/lead-reload', self.task, 'resume', '--session', 'lead').stdout
+        for expected in ('当前角色：lead', '会话标识：lead', '运行入口：app.codex',
+                         'running | 001-app | memory restore', 'App project memory catalog',
+                         'experiments/001-app/memory/app-task.md:3:'):
+            self.assertIn(expected, broken)
+        self.assertNotIn('App task memory catalog', broken)
+        self.assertFalse(self.log.exists())
+
 
     def test_app_print_is_read_only_preview_without_registering_or_taking_ownership(self):
         directory = self.root / '.agenthelm/state'

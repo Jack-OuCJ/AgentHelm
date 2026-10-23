@@ -24,10 +24,10 @@ herdr
 
 Codex 主会话可用 `./bin/dispatch --kind codex`。部署不会自动启动或连接现有会话。
 
-向主会话描述任务即可。需要独立 Lead 时，先准备 `templates/task-card.md` 格式的任务卡，再运行：
+向主会话描述任务即可。需要独立 Lead 时，把 `templates/task-card.md` 格式的任务卡作为标准输入交给 `bin/new-task`，正文直接保存到新任务 README；不另建通用 cards 归档。将下例的任务卡路径替换为实际文件：
 
-```sh
-./bin/new-task my-task < cards/my-task.md
+```bash
+./bin/new-task my-task < /path/to/task-card.md
 ```
 
 任务目录会编号为 `experiments/001-my-task/`，Herdr 在该目录创建独立 Lead 会话。该命令会真正启动模型，需在任务授权范围内使用；安装自检使用替身，不调用模型。
@@ -52,7 +52,7 @@ Lead 委派使用原生子代理；`run-executor --print` 只输出不可执行�
 
 已结束任务收到新的继续授权时，当前 Dispatcher 或原绑定 Lead 用 `bin/app-session resume --session OWN_ID --task ABS_TASK --reason "用户本次授权"` 恢复原绑定，Lead 再用 `bin/status running` 更新状态。恢复不创建聊天，保留模型与历史；并发上限、未决请求和宿主核验仍有效。
 
-本地协议与离线验收已实现；[宿主能力记录](claudedocs/2026-10-22-app-host-capabilities.md) 单列真实验证和缺口。当前 Codex 独立 Lead 创建闭环仍待真实验收；不能把离线测试通过称为已接通。完成后停止活跃跟踪并保留聊天，没有常驻 watcher。
+本地协议与离线验收已实现；[宿主能力记录](docs/validation/2026-10-22-app-host-capabilities.md) 单列真实验证和缺口。当前 Codex 独立 Lead 创建闭环仍待真实验收；不能把离线测试通过称为已接通。完成后停止活跃跟踪并保留聊天，没有常驻 watcher。
 
 ## 会话与规则如何组合
 
@@ -141,7 +141,9 @@ python3 skills/research-setup/scripts/smoke.py
 python3 skills/research-setup/scripts/deploy "$PWD" --role dispatcher --env cli-herdr
 ```
 
-工作区配置和任务内容被 Git 忽略。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
+本机配置、任务过程和原始证据默认被 Git 忽略；明确公开的任务成品使用精确路径例外。长期项目文档在 `docs/`，任务报告和 HTML 在对应任务 `artifacts/`，调查与证据在任务 `findings/`；不再用 claudedocs、通用 cards 或根 reports 归档。Matt 工单保留 `.scratch/<feature>/issues/`，架构决策保留 `docs/adr/`。导航见 [文档入口](docs/README.md)。
+
+项目经验在根 `memory/`，本任务恢复决定在任务 `memory/`。笔记是维护源，`MEMORY.md` 是 `bin/kb index` 生成的短目录；使用与校验见[工作记忆说明](docs/memory.md)。Dispatcher/Lead 启动只读适用目录，按主题显式读取正文；动态状态和权限仍实时核验。规则入口编辑 `templates/workspace-*.md` 后运行 `bin/kb sync-agents`；不要直接改生成的入口。
 
 协作、执行者、环境和研究规则的来源在 templates。修改模板后运行 `bin/install-rules`，更新本工作区的 `rules/claude-global.md`、`rules/executor-agents.md`、三份 `rules/env-*.md`、`rules/research-workflow.md` 和根目录 `rules-extra.md`，并同步根目录入口。初始化时生成全部环境说明，运行时按会话绑定优先、无绑定再按 env 选择一份；修改模板后须同步才会影响后续加载。配置示例初始化、任务卡生成、规则校验和测试仍可读取 templates。
 

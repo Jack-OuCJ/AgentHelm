@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Print task handoff context without requiring a multiplexer."""
+"""Print task handoff context without requiring a multiplexer.
+
+Memory indexes come from bootstrap by restored role: a Lead sees project and task catalogs,
+an Executor sees none. Note bodies are opened on demand with bin/kb memory read.
+"""
 import argparse
 from pathlib import Path
 from _workspace import task_directory, bootstrap, restored_session
@@ -30,8 +34,5 @@ index = root / 'INDEX.md'
 rows = [line for line in index.read_text().splitlines()
         if line.startswith('- ' + task.name + ' |') and f'experiments/{task.name}/README.md:' in line] if index.exists() else []
 print('\n'.join(rows[-5:]) or '(none)')
-print('## Task memory')
-memory = task / 'memory/MEMORY.md'
-print(memory.read_text().strip() if memory.exists() else '(none)')
 if args.count >= 3:
     print(f'Compacted {args.count} times this session. Finish the current stage, save task memory and STATUS, then consider /clear.')

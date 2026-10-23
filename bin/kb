@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Index, lint and distribute a research knowledge base."""
+"""Index, lint and distribute a research knowledge base; read project and task memory."""
 import argparse
 import os
 import json
@@ -8,9 +8,9 @@ import re
 
 ROOT = Path(__file__).resolve().parent.parent
 from _workspace import CONFIG, owned, write, register_skill
+import _memory
 BYTE_BUDGETS = {'AGENTS.md': 16384, 'rules/claude-global.md': 8192}
 INDEX_LINES = 300
-CARD_LINES = 150
 TASK_LINES = 300
 DONE_BYTES = 200 * 1024 ** 2
 
@@ -29,7 +29,7 @@ def conclusions(lines):
 
 
 def records():
-    for path in sorted(ROOT.glob('experiments/*/README.md')) + sorted(ROOT.glob('cards/*.md')):
+    for path in sorted(ROOT.glob('experiments/*/README.md')):
         lines = path.read_text().splitlines()
         meta = {}
         for line in lines[1:]:
@@ -40,33 +40,56 @@ def records():
         yield path, lines, meta
 
 
+def documents(base, suffixes):
+    """Navigation files below base; hidden, evidence and symbolic-link entries are skipped."""
+    if base.is_symlink() or not base.is_dir():
+        return []
+    found = []
+    for directory, folders, names in os.walk(base):
+        folders[:] = sorted(name for name in folders if not name.startswith('.') and name != 'evidence'
+                            and not os.path.islink(os.path.join(directory, name)))
+        found += [Path(directory) / name for name in sorted(names) if name.endswith(suffixes)
+                  and not name.startswith('.') and not os.path.islink(os.path.join(directory, name))]
+    return found
+
+
 def index(check):
-    sections = {'Conclusions': [], 'Cards': [], 'Reports': [], 'Superseded': []}
+    sections = {'Conclusions': [], 'Artifacts': [], 'Docs': [], 'Memory': [], 'Superseded': []}
     tasks = []
     for path, lines, meta in records():
         relative = path.relative_to(ROOT)
-        ident = meta.get('id', path.parent.name if path.name == 'README.md' else path.stem)
-        task = path.name == 'README.md'
-        if task:
-            status = path.parent / 'STATUS'
-            state = status.read_text().strip() if status.exists() else 'unstarted'
-            tasks.append(f'- {ident} | {meta.get("question", "")} | {state}')
+        ident = meta.get('id', path.parent.name)
+        status = path.parent / 'STATUS'
+        state = status.read_text().strip() if status.exists() else 'unstarted'
+        tasks.append(f'- {ident} | {meta.get("question", "")} | {state}')
         if meta.get('superseded_by'):
             sections['Superseded'].append(f'- {ident} → {meta["superseded_by"]} | {relative}')
-        elif task:
+        else:
             for number, date, topic, tendency, confidence in conclusions(lines):
                 sections['Conclusions'].append(f'- {ident} | {topic or meta.get("question", "")} | {tendency} | {confidence} | {date} | {relative}:{number}')
-        else:
-            sections['Cards'].append(f'- {ident} | {meta.get("topic", "")} | {meta.get("valid_for", "")} | {relative}')
-    sections['Reports'] = [f'- [{p.stem}]({p.relative_to(ROOT)})' for p in sorted(ROOT.glob('reports/*.md'))]
+    for name in _memory.task_names():
+        artifacts = ROOT / 'experiments' / name / 'artifacts'
+        sections['Artifacts'] += [f'- [{name}/{p.relative_to(artifacts)}]({p.relative_to(ROOT)})'
+                                  for p in documents(artifacts, ('.md', '.html'))]
+    sections['Docs'] = [f'- [{p.relative_to(ROOT / "docs").with_suffix("")}]({p.relative_to(ROOT)})'
+                        for p in documents(ROOT / 'docs', ('.md',))]
+    memory, published, errors = _memory.publication()
+    if errors:
+        print('\n'.join(errors + ['index: invalid memory; nothing was published (fix the notes, then rerun bin/kb index)']))
+        return 1
+    sections['Memory'] = [f'- [{scope.title}]({scope.index})' for scope in published]
     outputs = {'INDEX.md': '# Index\n' + ''.join('\n## ' + k + '\n' + '\n'.join(v) + '\n' for k, v in sections.items()),
-               'EXPERIMENTS.md': '# Experiments\n\n' + '\n'.join(tasks) + '\n'}
+               'EXPERIMENTS.md': '# Experiments\n\n' + '\n'.join(tasks) + '\n', **memory}
     if check:
-        same = all((ROOT / name).exists() and (ROOT / name).read_text() == value for name, value in outputs.items())
-        print('index: ok' if same else 'index: stale')
-        return int(not same)
+        stale = [name for name, value in outputs.items()
+                 if ((ROOT / name).read_text() if (ROOT / name).is_file() else None) != value]
+        print('\n'.join([f'stale: {name}' for name in stale] + ['index: stale' if stale else 'index: ok']))
+        return int(bool(stale))
     for name, value in outputs.items():
-        write(ROOT / name, value)
+        if value is None:
+            owned(ROOT / name).unlink()
+        else:
+            write(ROOT / name, value)
     print('index: ok')
     return 0
 
@@ -83,22 +106,20 @@ def lint(brief=False):
     known = {meta.get('id') for _, _, meta in items}
     seen = set()
     for path, lines, meta in items:
-        task = path.name == 'README.md'
-        required = ('id', 'question') if task else ('id', 'topic', 'sources', 'date', 'valid_for')
-        reasons = [f'missing {key}' for key in required if not meta.get(key)]
+        reasons = [f'missing {key}' for key in ('id', 'question') if not meta.get(key)]
         if not lines or not lines[0].startswith('# '):
             reasons.append('missing title')
         ident = meta.get('id', '')
-        if ident != (path.parent.name if task else path.stem) or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', ident):
+        if ident != path.parent.name or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', ident):
             reasons.append('id must match filename/directory in kebab-case')
         if ident in seen:
             reasons.append('duplicate id')
         seen.add(ident)
         if meta.get('superseded_by') and meta['superseded_by'] not in known:
             reasons.append('unknown superseded_by')
-        budget(path, TASK_LINES if task else CARD_LINES)
+        budget(path, TASK_LINES)
         status = path.parent / 'STATUS'
-        if task and status.exists() and status.read_text().split('|', 1)[0].strip() == 'done':
+        if status.exists() and status.read_text().split('|', 1)[0].strip() == 'done':
             size = 0
             for directory, _, files in os.walk(path.parent):
                 for name in files:
@@ -162,5 +183,13 @@ if __name__ == '__main__':
     commands.add_parser('index').add_argument('--check', action='store_true')
     commands.add_parser('lint').add_argument('--brief', action='store_true')
     commands.add_parser('sync-agents')
+    memory = commands.add_parser('memory', help='read-only project and task memory').add_subparsers(
+        dest='action', required=True)
+    memory.add_parser('context', help='project catalog, plus the task catalog with --task').add_argument('--task')
+    memory.add_parser('read', help='one note with validity diagnostics').add_argument('note')
+    memory.add_parser('check', help='project and every direct task, or one --task').add_argument('--task')
+    memory.add_parser('fingerprint', help='dependencies JSON for workspace files').add_argument('files', nargs='+')
     args = parser.parse_args()
+    if args.command == 'memory':
+        raise SystemExit(_memory.main(args))
     raise SystemExit(index(args.check) if args.command == 'index' else lint(args.brief) if args.command == 'lint' else sync_agents())

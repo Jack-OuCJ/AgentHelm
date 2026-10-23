@@ -4,7 +4,7 @@ The user describes what to verify. The Lead aligns once (see "Lead alignment"), 
 The default goal is a tendency or a measurable result, not precision. When the user calls a task important, switch to strict mode (`rules-extra.md`). Quick is not tiny: the scale must still answer the question. Save only where the saving cannot change the conclusion; otherwise the run is wasted.
 (Not the dispatcher or a Lead? Follow only your task card or delegation prompt; the coordination rules below do not apply. Handoff conventions are in the executor conventions.)
 
-Each rule lives in one place; elsewhere it is referenced. Before adding a rule, grep for the topic and edit the existing place. Machine facts and resource limits → `.agenthelm/config/local.md`; delegation, review and optional skills → `rules/claude-global.md`; role-to-model mapping → `roles.toml` via `bin/models`; workflow and coordination → this file; strict mode, long runs, context handover, cleanup and conflicts → `rules-extra.md`; long-lived task-specific notes → the task's `memory/`.
+Each rule lives in one place; elsewhere it is referenced. Before adding a rule, grep for the topic and edit the existing place. Machine facts and resource limits → `.agenthelm/config/local.md`; delegation, review and optional skills → `rules/claude-global.md`; role-to-model mapping → `roles.toml` via `bin/models`; workflow and coordination → this file; strict mode, working memory, cleanup and conflicts → `rules-extra.md`. Cross-task memory lives in root `memory/`; task-only recovery notes live in the task's `memory/`.
 
 ## Workflow (default: quick tendency mode)
 
@@ -23,7 +23,7 @@ Each rule lives in one place; elsewhere it is referenced. Before adding a rule, 
    - **Limitations**: what was shrunk, what was not tested
    - **Worth escalating?**: if the conclusion drives an important decision, suggest strict mode
    The README starts with the title, then `- id: <directory name>` and `- question: <one sentence>`.
-6. Indexes are generated: `INDEX.md` and `EXPERIMENTS.md` come from `bin/kb index`, which `bin/status` runs on every change. Write research notes as `cards/<id>.md` (format in the executor conventions).
+6. Indexes are generated: `INDEX.md`, `EXPERIMENTS.md` and each memory scope's `MEMORY.md` come from `bin/kb index`, which `bin/status` runs on every change. Keep investigation in task `findings/`, finished reports and HTML in task `artifacts/`, and maintained project documents in `docs/`. Publish reusable memory through the working-memory protocol in `rules-extra.md`; do not create a parallel `cards/` or root `reports/` archive.
 
 ## Defaults for three task types
 
@@ -52,7 +52,7 @@ Each rule lives in one place; elsewhere it is referenced. Before adding a rule, 
 ## Lead alignment (once, at most two rounds)
 
 0. **Pre-authorized**: if the task card says `Pre-authorized: yes`, skip the confirmation. Write the frozen version straight into the README with your defaults and reasons, run `bin/status running "<first step>"` and start.
-1. Read the task card and grep `INDEX.md` for existing cards and conclusions; if a card's `valid_for` covers the question, use it. Pilots are allowed (workflow step 2). Look up what you can yourself (paper, repository, dependencies, data availability) and write it as an assumption instead of asking.
+1. Read the task card and consult `INDEX.md` and the applicable memory indexes for earlier conclusions. Read a matching note and check its sources and validity conditions before reuse; changed dependencies require a focused recheck. Pilots are allowed (workflow step 2). Look up what you can yourself (paper, repository, dependencies, data availability) and write it as an assumption instead of asking.
 2. Send one confirmation, at most 25 lines. The user replies "OK" or with numbered changes:
    ```
    Task: <one sentence>
@@ -94,9 +94,9 @@ Limitations: <what was shrunk>   Next: <…>
 ## Division of work
 
 - The dispatcher session at the workspace root opens tasks and summarizes; it does not do tasks. Open a task with `bin/new-task <slug> [--important] < card.md`: it numbers the directory, writes the card, creates `findings/`, sets STATUS and starts a Lead (lead, or lead_important with `--important`). Explain to the user why a new task is opened rather than folded into an existing one.
-- Dispatcher memory survives `/clear`: mission and rules are here; open items waiting on the user or the dispatcher live only in root `TODO.md` (at most 20 lines, update on change, delete when done); task state lives in each STATUS and README. The session-start hook injects them.
+- Dispatcher recovery separates rules, memory and progress: mission and rules are here; cross-task notes are in project `memory/`; open decisions live only in root `TODO.md` (at most 20 lines, update on change); task progress stays in each STATUS and README. Startup reveals the applicable memory indexes, not all note bodies.
 - Dispatcher summary: one line per task, needs-input first with the question and default: `<status> | <NNN-slug> | <conclusion or decision needed> | <time/budget>`. Use only running, needs-input, blocked, done; do not expand unchanged tasks.
 - Each Lead works in `experiments/NNN-slug/`. After alignment, execution goes to fact by default; hard parts and work needing deterministic acceptance go to hard. The Lead designs, accepts and concludes, and does only small hands-on work (under about 10 minutes, or work that needs judgement while doing it).
 - Visual design and construction go to the visual role; inside visual tasks, research goes to fact, copy to writing, code review to review and aesthetic review to aesthetic. One agent builds and self-checks a batch of pages; rework happens once for the whole batch.
 - When a task touches a specialized library, data format or method, load the matching skill (or skill router) before planning or coding; do not write from memory.
-- If a Lead session disappears before the task is done, resume it and brief it from STATUS, `memory/` and the README.
+- If a Lead session disappears before the task is done, resume it from STATUS, README and the project/task memory indexes; open only relevant notes and recheck their sources.

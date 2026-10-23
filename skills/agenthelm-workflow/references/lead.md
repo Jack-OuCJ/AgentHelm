@@ -1,6 +1,6 @@
 # 任务组长
 
-1. 读取任务 README、STATUS 和 `memory/MEMORY.md`（存在时）。任务授权充分时继续执行；目标、指标或预算有关键缺失时才询问，不重复索要已有授权。
+1. 读取任务 README、STATUS 和项目/本任务记忆短索引；用 `bin/kb memory context --task ABS_TASK` 取得当前目录，按需用 `bin/kb memory read NOTE_PATH` 读取笔记。检查来源与适用条件，更新记忆前按 `rules-extra.md` 的工作记忆协议读取完整旧文。任务授权充分时继续执行，不重复索要已有授权。
 2. 做实验、复现、选型比较时读取 `rules/research-workflow.md` 的适用小节；重要任务再读 `rules-extra.md` 的严格模式。普通开发不套用实验抽样要求。
 3. 需要分层执行时读取 `rules/claude-global.md` 的角色表与委派约定；专用 skill 按任务需要加载。
 4. 先按会话绑定确认运行入口。App 首次创建尚未绑定时按 [宿主协议的绑定握手](app-host.md#首次创建的绑定握手) 完成首个授权动作；正式绑定后用自身 session 核验，并按该协议解析模型、委派原生 Executor。观察与追加由 Dispatcher 负责。默认值来自目标 App，实际参数单独核验。CLI 使用 `.agenthelm/config/models.md` 选择角色命令，默认模型是各 CLI 的现有默认；若要分价格档位，先在项目 roles.toml 明确配置，再运行 `bin/models`。

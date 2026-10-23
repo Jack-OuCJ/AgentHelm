@@ -4,7 +4,7 @@
 
 代码与离线验证已完成，真实 App 验收按下表单列。集成分支为 `feat-app-lead-sessions`，实现基点为 `91d4267`，审查修复合入点为 `01997a5`。所有提交只在本地，未推送、未创建 PR。
 
-规格见 [App 模式规格](2026-10-22-app-mode-spec.md)，任务图与各票结果见 [本地 tracker](../.scratch/app-mode/TRACKER.md)。
+规格见 [App 模式规格](../design/2026-10-22-app-mode-spec.md)，任务图与各票结果见 [本地 tracker](../../.scratch/app-mode/TRACKER.md)。
 
 ## 已实现行为
 

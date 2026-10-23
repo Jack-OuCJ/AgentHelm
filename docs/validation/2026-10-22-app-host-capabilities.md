@@ -29,7 +29,7 @@
 
 - helper 已在本轮真实 Desktop 会话与原生 Executor 上进行只读核查。独立 Lead 使用 `--session ID --turn TURN_ID`；Executor 另用 `--kind executor --parent-session LEAD_ID`，必须从精确子代理 ID 的原生 `read_thread` 独立取得当前 turn，防止将 fork 父历史当成自身运行。
 - 输出只包括会话/轮次、runtime cwd、model/effort、来源及快照定位。runtime cwd 可以为工作区根；created 回执的任务 cwd 则必须来自 workdir=任务目录的真实任务动作及实际 stdout。helper 不证明 visible、executed，也不证明默认模型来源。
-- 宿主操作步骤已收敛到 [App 宿主协议](../skills/agenthelm-workflow/references/app-host.md)。创建、读取、等待、追加、交接和完成均保留请求与观察证据；未决结果阻止盲目重试。
+- 宿主操作步骤已收敛到 [App 宿主协议](../../skills/agenthelm-workflow/references/app-host.md)。创建、读取、等待、追加、交接和完成均保留请求与观察证据；未决结果阻止盲目重试。
 - 尚未验收：Codex 原生 create_thread 创建独立可见 Lead、首个任务动作、实际角色模型/强度、读取/等待与人工介入后的追加、完整回执闭环。只读参数核查与离线替身均不关闭这些项目。
 - 仍有缺口：目标 App 新会话默认模型及所选模型默认强度的可靠完整取源。角色显式 model/effort 可以避免默认解析，但不能省略实际参数验证。
 

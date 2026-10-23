@@ -25,7 +25,9 @@ description: 在 AgentHelm 工作区创建或调度研究任务、启动 Lead、
 | 负责一个任务的组长，设计、验收、结论 | [lead](references/lead.md) |
 | 接到明确范围的调查、实现、验证任务 | [executor](references/executor.md) |
 | 模型分配、机器限制、运行环境 | `.agenthelm/config/models.md`、`.agenthelm/config/local.md` |
-| 严格实验、长任务、上下文恢复、结论冲突 | `rules-extra.md`，只读相关小节 |
+| 严格实验、长任务、上下文恢复、记忆更新或结论冲突 | `rules-extra.md`，只读相关小节 |
+
+开始、恢复或重复调查时，Dispatcher/Lead 先读适用的记忆短索引，再按主题用 `bin/kb memory read` 读笔记并检查来源。项目记忆在根 `memory/`，任务记忆在任务 `memory/`；索引由 `bin/kb index` 生成。Executor 只读委派指定的相关笔记，不加载全库。
 
 路径相对于本工作区根目录。切换角色时再加载对应 reference，不要预读全部文件。
 本入口不会批量加载全局 skills，也不会屏蔽它们；任务需要专用 skill 时按用户现有规则加载。

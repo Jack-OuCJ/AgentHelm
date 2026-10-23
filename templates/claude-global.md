@@ -35,7 +35,7 @@ Rules name roles, never models. `bin/models` turns your local `.agenthelm/config
 - Read-only delegations have no fixed fan-out; a large survey may run many sub-agents in one session. Gate tests, builds and browsers by the memory measure in `local.md`.
 - After delegating, read the acceptance output and spot-check the change. Do not redo the work.
 - Stop and report after two failed acceptance runs or when a design trade-off appears.
-- Keep artifacts that must survive a restart in the task directory; temporary files follow the storage tiers in `local.md`.
+- Keep artifacts that must survive a restart in the task directory: reader deliverables in `artifacts/`, investigation and evidence in `findings/`. Reusable memory follows `rules-extra.md`; temporary files follow the storage tiers in `local.md`.
 
 ## Review
 

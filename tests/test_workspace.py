@@ -23,15 +23,32 @@ def snapshot(path):
     return result
 
 
+def write_note(root, relative, body='', **fields):
+    """Write a memory note in the restricted one-line frontmatter; None omits a field."""
+    path = Path(root) / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = {'id': path.stem, 'scope': 'project' if relative.startswith('memory/') else 'task',
+              'kind': 'decision', 'status': 'active', 'summary': f'{path.stem} summary',
+              'verified_at': '2026-10-22', 'valid_when': 'the test fixture is unchanged',
+              'sources': ['README.md']}
+    values.update(fields)
+    lines = [f'{key}: {json.dumps(value, ensure_ascii=False) if isinstance(value, (list, dict)) else value}'
+             for key, value in values.items() if value is not None]
+    path.write_text('\n'.join(['---', *lines, '---', body]) + '\n')
+    return path
+
+
 class WorkspaceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='agenthelm-workspace-test-')
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
         self.root = self.base / 'workspace'
+        # Real project memory, evidence packages and pre-migration archives stay out of fixtures.
         shutil.copytree(SOURCE, self.root, ignore=shutil.ignore_patterns(
             '.git', '.agenthelm', '.agents', '.claude', 'skills-library', '__pycache__', 'experiments',
-            'cards', 'reports', 'rules', 'INDEX.md', 'BOARD.md', 'EXPERIMENTS.md', 'rules-extra.md'))
+            'cards', 'reports', 'rules', 'INDEX.md', 'BOARD.md', 'EXPERIMENTS.md', 'rules-extra.md',
+            'memory', 'evidence', 'claudedocs'))
         self.home = self.base / 'home'
         (self.home / '.agents/skills/existing').mkdir(parents=True)
         (self.home / '.agents/AGENTS.md').write_text('global rules sentinel\n')
@@ -114,10 +131,13 @@ class WorkspaceTests(unittest.TestCase):
         task = self.root / 'experiments/001-hook'
         (task / 'findings').mkdir(parents=True)
         (task / 'STATUS').write_text('running | hook test')
-        (task / 'memory').mkdir()
-        (task / 'memory/MEMORY.md').write_text('Saved decision: keep scope')
+        write_note(self.root, 'experiments/001-hook/memory/keep-scope.md',
+                   summary='Saved decision: keep scope', body='Hook note body stays on disk')
+        self.run_cmd('bin/kb', 'index')
         result = self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd':str(task / 'findings'),'source':'compact','session_id':'test-session'}))
         self.assertIn('Saved decision: keep scope', result.stdout)
+        self.assertIn('running | hook test', result.stdout)
+        self.assertNotIn('Hook note body stays on disk', result.stdout)
         self.assertEqual((task / '.compactions').read_text(), 'test-session\n1\n')
         result = self.run_cmd('bin/lead-watch-start', input=json.dumps({'cwd':str(self.home),'source':'startup'}))
         self.assertEqual(result.stdout, '')

@@ -5,6 +5,8 @@
 - 开始 AgentHelm 任务前读取 `skills/agenthelm-workflow/SKILL.md`，再按当前角色加载对应 reference；不一次读完全部规则。
 - 角色按当前 session 绑定和用户授权确定。App 的唯一 Dispatcher 须显式注册，根目录不授予调度权限；Lead/Executor 按各自绑定恢复。无 App 绑定时沿用 CLI 的根目录主会话与任务目录约定。App 操作按 workflow 的宿主协议执行。
 - 配置在 `.agenthelm/config/`，工具状态在 `.agenthelm/state/`，任务进度在任务目录的 `STATUS`。不得修改用户 HOME 中的规则、skills、插件、配置、凭据或定时任务。
+- 本项目的任务成品放 `experiments/<task>/artifacts/`，调查与证据放任务 `findings/`，长期项目文档放 `docs/`；Matt 工单保留 `.scratch/<feature>/issues/`，ADR 保留 `docs/adr/`。不再使用 `claudedocs/`、通用 `cards/` 或根 `reports/` 归档。
+- 开始、恢复或重复调查前，Dispatcher 读项目记忆短索引，Lead 读项目及当前任务短索引，再按主题读取笔记并检查来源；Executor 仅读取委派指定的相关笔记。记忆的格式、更新与冲突处理见 `rules-extra.md` 的工作记忆协议；索引由 `bin/kb index` 生成。
 - Claude Code 和 Codex 沿用用户已安装 CLI、账号、代理、默认模型与权限。不要传递跳过审批/沙箱的参数。
 - 子会话的启动目录必须在本工作区；委派 prompt 必须给出本文件与 router 的绝对路径、角色、任务目录、可写文件、验收命令和禁止修改全局配置的边界。不要假设子智能体继承父会话完整上下文或已加载的 skill。
 - 不自动提交、推送或外发消息。若需跨会话消息或执行子智能体，先核对当前任务的用户授权与宿主限制。

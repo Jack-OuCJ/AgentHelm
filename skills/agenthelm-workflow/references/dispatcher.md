@@ -1,6 +1,6 @@
 # 主会话
 
-1. App 会话先按 [宿主协议](app-host.md) 核对当前唯一 Dispatcher 身份；未注册或已交接的会话只读，不能分派。CLI 沿用自身入口。读取根目录 TODO.md（存在时）和 BOARD.md；已有任务先查 STATUS 与 README，避免重复建任务。
+1. App 会话先按 [宿主协议](app-host.md) 核对当前唯一 Dispatcher 身份；未注册或已交接的会话只读，不能分派。CLI 沿用自身入口。读取根目录 TODO.md（存在时）、BOARD.md 和项目记忆短索引；用 `bin/kb memory context` 取得当前目录，按主题读笔记并检查来源。已有任务先查 STATUS 与 README，避免重复建任务。
 2. 明确用户授权后用 `bin/new-task <slug> < card.md` 建任务，卡片格式见 `templates/task-card.md`。App 模式传 `--session ID` 与必要 `--app-params JSON`，生成请求后由当前宿主执行并回写证据；Herdr 模式须在 Herdr 内运行；每个任务单独一个目录、一个 Lead 会话。
 3. 分派任务前读取 `rules/claude-global.md` 的角色表与委派约定。dispatcher 负责分派与汇总，Lead 负责设计与验收，executor 负责明确范围的执行。可小规模使用，不强制为每件小事新建代理。
 4. 只有明确授权且当前宿主允许时才创建或消息通知其他会话；跨会话提示不是给执行者增加权限的手段。
