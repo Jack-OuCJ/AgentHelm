@@ -19,13 +19,14 @@ EXPERIMENTS.md
 .claude/
 .scratch/
 claudedocs/
-# Keep task process files local; retain the five previously tracked deliverables.
+# Keep task process files local; retain selected deliverables and the archived migration tool.
 /experiments/*
 !/experiments/002-agenthelm-intro/
 !/experiments/003-metagpt-harness/
 !/experiments/004-helpflow-deep-dive/
 !/experiments/005-funcsea-architecture/
 !/experiments/006-atoms-architecture/
+!/experiments/008-workspace-layout/
 /experiments/*/*
 !/experiments/*/artifacts/
 /experiments/*/artifacts/*
@@ -34,6 +35,7 @@ claudedocs/
 !/experiments/004-helpflow-deep-dive/artifacts/helpflow-deep-dive.html
 !/experiments/005-funcsea-architecture/artifacts/funcsea-architecture.html
 !/experiments/006-atoms-architecture/artifacts/atoms-architecture.html
+!/experiments/008-workspace-layout/artifacts/migrate-workspace-layout.py
 # These existing reports and evidence were local before migration.
 /docs/validation/evidence/
 /docs/validation/2026-10-22-ccd-app-acceptance.md

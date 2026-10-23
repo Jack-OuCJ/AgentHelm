@@ -1,4 +1,4 @@
-"""Tests for scripts/migrate-workspace-layout.py.
+"""Tests for the archived task 008 workspace migration script.
 
 Everything runs against a hand-built temporary fixture root; the real repo's
 claudedocs/ is never touched or copied. See
@@ -18,7 +18,9 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_PATH = REPO_ROOT / "scripts" / "migrate-workspace-layout.py"
+SCRIPT_PATH = (
+    REPO_ROOT / "experiments" / "008-workspace-layout" / "artifacts" / "migrate-workspace-layout.py"
+)
 
 _spec = importlib.util.spec_from_file_location("migrate_workspace_layout", SCRIPT_PATH)
 migrate = importlib.util.module_from_spec(_spec)
@@ -501,6 +503,9 @@ class IntegrityRegressionTests(WorkspaceLayoutTestCase):
 
 
 class CliTests(WorkspaceLayoutTestCase):
+    def test_default_root_is_repository_root(self):
+        self.assertEqual(migrate._default_root(), REPO_ROOT)
+
     def test_main_plan_subcommand(self):
         rc = migrate.main(
             ["--root", str(self.root), "--manifest", str(self.manifest_path), "plan"]

@@ -711,7 +711,7 @@ def cmd_check(root: Path, manifest_path: Path, accept_link_edits: bool) -> int:
 
 
 def _default_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parents[3]
 
 
 def build_parser() -> argparse.ArgumentParser:
