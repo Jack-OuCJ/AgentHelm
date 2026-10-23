@@ -1,4 +1,4 @@
-"""Prepare native host operations; accept evidence before binding running sessions."""
+"""Prepare native host operations; separate Lead identity from runtime verification."""
 import os
 from uuid import uuid4
 
@@ -15,17 +15,14 @@ def text(value, name):
 
 
 def require_capabilities(binding, operation):
-    required = ('create', 'read', 'wait', 'followup', 'model', 'effort', 'verify_model')
+    required = ('create', 'read', 'wait', 'followup', 'model', 'effort')
     if operation == 'executor':
-        required = ('native_executor', 'model', 'effort', 'verify_model')
+        required = ('native_executor', 'model', 'effort')
     capabilities = binding['capabilities']
     for name in required:
         capability = capabilities.get(name, {})
         if not capability.get('available'):
             raise ValueError(f'App capability unavailable: {name}; no CLI fallback')
-    fields = capabilities['verify_model'].get('fields', [])
-    if not isinstance(fields, list) or not {'model', 'effort'}.issubset(fields):
-        raise ValueError('verify_model must read back model and effort')
     return capabilities
 
 
@@ -38,11 +35,11 @@ def model_parameters(owner, operation, role, payload):
     effective = {field: model[field] for field in ('model', 'effort')}
     defaults = payload.get('defaults', {})
     if entry == 'app.ccd' and operation == 'executor':
-        inherited = owner.get('actual', {})
+        inherited = owner.get('configured', owner.get('actual', owner.get('requested', {})))
         for field in effective:
             if effective[field] is None:
                 if not isinstance(inherited.get(field), str) or not inherited[field]:
-                    raise ValueError('CCD Executor inherits the bound Lead, whose actual ' + field + ' is unknown')
+                    raise ValueError('CCD Executor inherits the bound Lead, whose selected ' + field + ' is unknown')
                 effective[field] = inherited[field]
     if any(value is None for value in effective.values()):
         if not isinstance(defaults, dict):
@@ -117,15 +114,32 @@ def prepare(state, identifier, operation, task, payload):
                'entry': entry, 'workspace': str(ROOT), 'task': key, 'role': role,
                'model_binding': model, 'effective_request': effective, 'defaults': defaults,
                'prompt': prompt, 'brief': brief, 'status': 'pending',
-               'host_instructions': ('Use native independent visible App session creation and execute the first turn.'
+               'host_instructions': ('Create a native independent visible App session with request.prompt. '
+                                     'Bind its identity using evidence_level=identity and runtime_verified=false; '
+                                     'do not wait for a task action, turn ID or runtime model evidence. '
+                                     'Record runtime observations separately after normal execution.'
                                      if operation == 'create' else
-                                     'Use the bound Lead native subagent facility and execute the brief.') +
-               ' Keep cwd at task. Read back actual model and effort. Never substitute CLI or request arguments for evidence.'}
+                                     'Use the bound Lead native subagent facility. The Executor completes the brief '
+                                     'and reports results without a startup handshake or waiting for local binding. '
+                                     'The parent records status=completed before optional runtime verification '
+                                     'and verifies cwd and actual model/effort after completion.') +
+               ' Keep cwd at task. Never substitute CLI or request arguments for runtime evidence.'}
+    if operation == 'create' and entry == 'app.ccd':
+        request['host_instructions'] = (
+            'Create a native independent visible App session with a placeholder only. Set model and effort, '
+            'then read them back with get_session. Submit evidence_level=settings with executed=false and '
+            'runtime_verified=false, or bind identity only if settings readback is unavailable. '
+            'Dispatch request.prompt via read/followup after identity binding. '
+            'Host metadata may prove workspace and task cwd. No handshake turn or prompt_id is required. '
+            'Never substitute request arguments for host evidence; reuse an existing unresolved creation.')
     if agent:
         request['subagent_type'] = agent
         request['host_instructions'] = (
             f'Use the bound Lead native Agent tool with subagent_type={agent} and no model argument; '
-            'the agent file pins model and effort. Execute the brief with cwd at task. Read back actual model and '
+            'the agent file pins model and effort; pass the requested effort explicitly. '
+            'The Executor completes the brief with cwd at task and reports results without a startup handshake '
+            'or waiting for local binding. The parent records status=completed before runtime verification. '
+            'After completion, the parent reads actual model and '
             'effort from the subagent transcript; cwd evidence comes from the executed pwd output. '
             'Never substitute CLI or request arguments for evidence.')
     state['requests'][request['id']] = request
@@ -155,13 +169,29 @@ def result(state, identifier, request_id, payload):
             ('request_id', request_id), ('owner_epoch', request['owner_epoch']),
             ('entry', request['entry'])))):
         raise ValueError('receipt must match request_id, owner_epoch and entry')
+    level = payload.get('evidence_level', 'runtime')
+    if level not in ('runtime', 'settings', 'identity'):
+        raise ValueError('invalid evidence_level')
+    identity_only = level == 'identity'
+    if identity_only and request['operation'] != 'create':
+        raise ValueError('identity evidence is only allowed for Lead create')
+    settings_only = level == 'settings'
+    if settings_only and (request['operation'] != 'create' or request['entry'] != 'app.ccd'):
+        raise ValueError('settings evidence is only allowed for app.ccd Lead create')
     if request['operation'] in ('read', 'wait'):
         return observe_result(state, request, payload)
     if request['operation'] == 'followup':
         return followup_result(state, request, payload)
     status = payload.get('status')
-    if status not in ('created', 'queued', 'unknown', 'failed'):
+    if status not in ('created', 'completed', 'queued', 'unknown', 'failed'):
         raise ValueError('invalid host receipt status')
+    completion_only = status == 'completed'
+    if completion_only and (request['operation'] != 'executor' or level != 'runtime'):
+        raise ValueError('completion receipt is only allowed for Executor results')
+    if request['status'] == 'completed' and (
+            status not in ('created', 'completed')
+            or payload.get('session') != request['completion']['session']):
+        raise ValueError('completed Executor cannot change session or regress to pending execution')
     task = task_path(request['task'])
     if status in ('queued', 'unknown', 'failed'):
         text(payload.get('source'), 'host outcome source')
@@ -179,11 +209,18 @@ def result(state, identifier, request_id, payload):
         raise ValueError('created session must be independent from Dispatcher and caller')
     if actual_session in state['sessions']:
         raise ValueError('created session is already bound')
+    if any(other['id'] != request_id and other.get('completion', {}).get('session') == actual_session
+           for other in state['requests'].values()):
+        raise ValueError('Executor session is already recorded by another completed request')
     if any(binding.get('session') == actual_session for binding in state['tasks'].values()):
         raise ValueError('created session is already bound to another task')
     if payload.get('workspace') != str(ROOT) or payload.get('cwd') != str(task):
         raise ValueError('receipt workspace and actual task cwd must match request')
-    required = ('session', 'workspace', 'cwd', 'executed', 'model', 'effort')
+    required = ('session', 'workspace', 'cwd')
+    if not identity_only:
+        required += ('executed',)
+        if not completion_only:
+            required += ('model', 'effort')
     if request['operation'] == 'create':
         required += ('visible', 'independent')
         if payload.get('visible') is not True or payload.get('independent') is not True:
@@ -192,31 +229,58 @@ def result(state, identifier, request_id, payload):
         required += ('native', 'parent_session')
         if payload.get('native') is not True or payload.get('parent_session') != identifier:
             raise ValueError('Executor must be a native subagent of its bound Lead')
-        if request.get('subagent_type'):
+        if request.get('subagent_type') and not completion_only:
             required += ('served_model',)
-    if payload.get('executed') is not True:
+    if completion_only:
+        required += ('completed',)
+        if (payload.get('executed') is not True or payload.get('runtime_verified') is not False
+                or any(field in payload for field in ('actual', 'configured', 'served_model', 'model', 'effort'))):
+            raise ValueError('completion receipt records execution separately from runtime model verification')
+    elif identity_only:
+        if (payload.get('runtime_verified') is not False
+                or payload.get('executed', False) is not False
+                or any(field in payload for field in ('actual', 'configured', 'served_model', 'model', 'effort'))):
+            raise ValueError('identity receipt cannot claim execution or observed model settings')
+    elif settings_only:
+        if payload.get('executed') is not False or payload.get('runtime_verified') is not False:
+            raise ValueError('settings receipt requires executed=false and runtime_verified=false')
+        if 'actual' in payload or 'served_model' in payload:
+            raise ValueError('settings receipt cannot claim runtime actual or served_model')
+        required = tuple(name for name in required if name != 'executed')
+    elif payload.get('executed') is not True:
         raise ValueError('first turn has not executed in task cwd')
+    elif 'runtime_verified' in payload and payload['runtime_verified'] is not True:
+        raise ValueError('runtime receipt cannot deny runtime verification')
     evidence = payload.get('evidence')
     if not isinstance(evidence, dict):
         raise ValueError('created receipt requires individual host observation evidence')
     for name in required:
         text(evidence.get(name), 'observed ' + name)
-    actual = {name: text(payload.get(name), 'actual ' + name) for name in ('model', 'effort')}
-    if actual != request['effective_request']:
-        raise ValueError('actual model/effort does not match resolved target App request')
+    if completion_only:
+        request.update(status='completed', receipt=payload, completion=payload)
+        return request
+    selected = None if identity_only else {
+        name: text(payload.get(name), 'observed ' + name) for name in ('model', 'effort')}
+    if selected is not None and selected != request['effective_request']:
+        raise ValueError('observed model/effort does not match resolved target App request')
     if request.get('subagent_type'):
         # CCD transcripts keep the [1m] variant in requestedModel but report the served base ID in message.model.
         served = text(payload.get('served_model'), 'served model')
-        if served != actual['model'].removesuffix('[1m]'):
+        if served != selected['model'].removesuffix('[1m]'):
             raise ValueError('served model does not match the requested CCD model')
     request['status'] = 'succeeded'
     request['receipt'] = payload
+    verified = {'evidence_level': level, 'runtime_verified': level == 'runtime'}
+    if identity_only:
+        verified['requested'] = dict(request['effective_request'])
+    else:
+        verified['configured' if settings_only else 'actual'] = selected
     binding = {'entry': request['entry'], 'capabilities': state['sessions'][identifier]['capabilities'],
                'role': 'lead' if request['operation'] == 'create' else 'executor',
-               'task': str(task), 'actual': actual, 'request': request_id}
+               'task': str(task), **verified, 'request': request_id}
     state['sessions'][actual_session] = binding
     if request['operation'] == 'create':
-        state['tasks'][str(task)].update(session=actual_session, state='running', actual=actual)
+        state['tasks'][str(task)].update(session=actual_session, state='running', **verified)
     return request
 
 
@@ -252,14 +316,18 @@ def prepare_tracking(state, identifier, operation, task, payload):
             raise ValueError('task has an unresolved write request; do not resend')
         request.pop('observation_order')
         request['brief'] = text(payload.get('brief'), 'followup brief')
-        request['effective_request'] = dict(binding['actual'])
+        request['effective_request_source'] = next(
+            field for field in ('configured', 'actual', 'requested') if field in binding)
+        request['effective_request'] = dict(binding[request['effective_request_source']])
         request['revalidate'] = {name: observation[name] for name in
                                  ('request_id', 'revision', 'cursor', 'source')}
         request['host_instructions'] = (
             'Read and revalidate the latest native context revision and cursor before sending. '
-            'Verify current model and effort before sending. If context or settings changed, do not send; '
-            'return stale and read again, recording verified actual settings. Send only this brief to the existing '
-            'Lead, preserving its actual model and effort. Never replay an old task or reset user changes.')
+            'Preserve observed settings when available; for identity-only bindings retain requested values '
+            'without waiting for runtime evidence. If context or observed settings changed, do not send; '
+            'return stale and read again, recording observed configured or runtime actual settings separately. '
+            'Send only this brief to the existing Lead, preserving its selected model and effort. '
+            'A send receipt does not verify runtime execution. Never replay an old task or reset user changes.')
     else:
         binding['observation_counter'] = order
     state['requests'][request['id']] = request
@@ -298,21 +366,36 @@ def observe_result(state, request, payload):
         text(evidence.get(name), 'observed ' + name)
     for name in ('revision', 'cursor', 'context'):
         text(payload.get(name), name)
-    if 'actual' in payload:
-        actual = payload['actual']
-        if not isinstance(actual, dict):
-            raise ValueError('observed actual settings must include model and effort')
+    if 'configured' in payload and 'actual' in payload:
+        raise ValueError('observe configured settings and runtime actual separately')
+    settings_field = 'configured' if 'configured' in payload else 'actual' if 'actual' in payload else None
+    if settings_field:
+        if settings_field == 'configured':
+            if request['entry'] != 'app.ccd' or payload.get('runtime_verified') is not False:
+                raise ValueError('configured observation requires app.ccd and runtime_verified=false')
+        elif ((binding.get('runtime_verified') is False and payload.get('runtime_verified') is not True)
+              or ('runtime_verified' in payload and payload['runtime_verified'] is not True)):
+            raise ValueError('actual observation requires explicit runtime verification')
+        selected = payload[settings_field]
+        if not isinstance(selected, dict):
+            raise ValueError('observed settings must include model and effort')
         for name in ('model', 'effort'):
-            text(actual.get(name), 'observed actual ' + name)
-            text(evidence.get(name), 'observed actual ' + name + ' evidence')
-        actual = {name: actual[name] for name in ('model', 'effort')}
-        binding['actual'] = actual
-        state['sessions'][request['target_session']]['actual'] = actual
+            text(selected.get(name), 'observed ' + settings_field + ' ' + name)
+            text(evidence.get(name), 'observed ' + settings_field + ' ' + name + ' evidence')
+        selected = {name: selected[name] for name in ('model', 'effort')}
+        for target in (binding, state['sessions'][request['target_session']]):
+            target.pop('actual' if settings_field == 'configured' else 'configured', None)
+            target[settings_field] = selected
+            target['runtime_verified'] = settings_field == 'actual'
+            target['evidence_level'] = 'runtime' if settings_field == 'actual' else 'settings'
+    elif payload.get('runtime_verified') is True:
+        raise ValueError('runtime verification requires observed actual values')
     observation = {name: payload[name] for name in
                    ('session', 'state', 'revision', 'cursor', 'context', 'source', 'evidence')}
     observation.update(request_id=request['id'], order=request['observation_order'])
-    if 'actual' in payload:
-        observation['actual'] = actual
+    if settings_field:
+        observation[settings_field] = selected
+        observation['runtime_verified'] = settings_field == 'actual'
     binding['observation'] = observation
     state['sessions'][request['target_session']]['observation'] = observation
     request.update(status='succeeded', receipt=payload)
@@ -340,6 +423,8 @@ def followup_result(state, request, payload):
         return request
     if status != 'sent' or payload.get('sent') is not True:
         raise ValueError('followup requires evidence of actual native send')
+    if payload.get('runtime_verified') is True or 'actual' in payload:
+        raise ValueError('followup send cannot verify runtime actual; use a runtime observation')
     observation = binding.get('observation', {})
     if any(observation.get(name) != value for name, value in request['revalidate'].items()):
         raise ValueError('followup observation is stale; read latest context again')
@@ -347,7 +432,7 @@ def followup_result(state, request, payload):
         if payload.get('revalidated_' + name) != request['revalidate'][name]:
             raise ValueError('native context changed before send; do not replay')
     if {name: payload.get(name) for name in ('model', 'effort')} != request['effective_request']:
-        raise ValueError('followup changed actual model or effort')
+        raise ValueError('followup changed selected model or effort')
     evidence = payload.get('evidence')
     if not isinstance(evidence, dict):
         raise ValueError('followup requires individual native send evidence')

@@ -9,6 +9,8 @@ description: 在 AgentHelm 工作区创建或调度研究任务、启动 Lead、
 
 开始或恢复时，先按宿主真实 session ID 查询 `.agenthelm/state/app-sessions.json` 的绑定；已绑定会话使用其 entry，显式 entry 必须与绑定一致。App 入口对应 `rules/env-app.md`，并在执行原生操作前读取 [App 宿主协议](references/app-host.md)。没有绑定时再读取 `.agenthelm/config/env`，按下表加载一份环境说明；缺文件使用 `cli-plain`。未知值报告错误，不改写配置。生效规则缺失时报告路径并提示运行 `bin/install-rules`，停止启动，不回退模板。启动提示已含对应说明时无需重复读取。
 
+已由父会话授权的原生 Executor 按委派 prompt 的 entry、task 与文件边界直接完成任务，无需自身本地绑定；结束后由父会话核验。新 Lead 可先执行授权任务，父会话凭原生身份绑定，运行取证单独补录；需委派时先完成身份绑定。详细分支见 App 宿主协议。
+
 根目录与 `.agenthelm/config/role` 只是 CLI 历史约定，不授予 App 调度身份。App 的唯一 Dispatcher 以当前绑定为准；未注册会话先核验原生身份，再按用户授权注册或交接。旧主控只读恢复，不重新注册抢占。
 
 | env | 环境说明 |

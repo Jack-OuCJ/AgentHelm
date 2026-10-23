@@ -51,7 +51,7 @@ def generate(config):
                             if role.get('research') == 'split' else code(role.get('research', False)))
         commands = '<br>'.join(commands)
         lines.append(f'| {name} ({role["desc"]}) | {role["tier"]} | {"<br>".join(active) or "unavailable"} | {commands or "—"} |')
-    lines += ['', 'App 参数为新会话的请求值，default 表示目标 App 原生默认；inherit 表示 CCD Executor 沿用所属 Lead 的实际值；'
+    lines += ['', 'App 参数为新会话的请求值，default 表示目标 App 原生默认；inherit 表示 CCD Executor 沿用所属 Lead 的所选设置或请求值；'
               '实际生效值由宿主验证。', '',
               '| Role | App entry | Requested model | Model source | Requested effort | Effort source |',
               '|---|---|---|---|---|---|']
@@ -133,7 +133,8 @@ def ccd_agent(config, role):
         lines.append('effort: ' + binding['effort'])
     lines += ['---', '',
               f'你是 AgentHelm {role} Executor。按委派 prompt 执行：只在授权任务目录工作，只写授权文件，'
-              '运行验收并报告真实结果。不创建下层代理或会话，不修改全局配置。', '']
+              '直接完成委派任务和验收后报告真实结果，无需启动握手或等待本地绑定；父会话事后核验运行证据。'
+              '不创建下层代理或会话，不修改全局配置。', '']
     return '\n'.join(lines)
 
 
