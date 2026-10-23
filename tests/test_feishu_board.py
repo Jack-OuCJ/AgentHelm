@@ -96,6 +96,17 @@ class FeishuBoardTests(unittest.TestCase):
         self.assertIn('verified',self.remote_state()['rows']['rec-1'][self.fields['conclusion']])
         self.assertFalse((self.task / '.feishu-pending').exists())
 
+    def test_no_sync_keeps_board_untouched_and_marks_pending(self):
+        result = self.run_cmd('bin/status','done','Offline finish','--no-sync',cwd=self.task)
+        self.assertIn('board sync skipped',result.stderr)
+        self.assertIn('done | 001-board | Offline finish',(self.task / 'STATUS').read_text())
+        self.assertTrue((self.task / '.feishu-pending').exists())
+        self.assertIn('飞书待同步',(self.root / 'BOARD.md').read_text())
+        self.assertFalse(self.remote.exists(),'--no-sync contacted the board')
+        self.run_cmd('bin/board-sync',self.task)
+        self.assertFalse((self.task / '.feishu-pending').exists())
+        self.assertEqual(self.remote_state()['creates'],1)
+
     def test_offline_keeps_local_status_and_retry_clears_marker(self):
         failed_env = dict(self.env,FAKE_MODE='offline')
         result = self.run_cmd('bin/status','running','Local progress',cwd=self.task,env=failed_env)

@@ -8,7 +8,7 @@
 - 有效 Dispatcher 用 `bin/app-session show --session ID` 核对当前归属。已绑定 Lead/Executor 用 `bin/lead-reload ABS_TASK --session OWN_ID` 核对自身 session、entry、role 与任务；此命令不会授予 Dispatcher 权限。角色模型通过 `bin/models resolve ROLE --entry ENTRY` 解析；请求参数与实际生效值分别记录。
 - 能力登记由有效 Dispatcher 完成：查看当前宿主工具定义后，向 `bin/app-session capabilities --session DISPATCHER_ID` 提交 JSON：`entry`、总 `source`、逐项 `capabilities`。每项含 `available` 和自己的 `source`；创建需 create/read/wait/followup/model/effort/verify_model，Executor 另需 native_executor。`model.values` 列当前可用模型，`effort.combinations` 按模型列合法强度，`verify_model.fields` 必须含 model、effort。Lead/Executor 仍须核对本次宿主工具；缺口报告父会话，不冒用主控 ID 登记。工具存在与真实端到端验收分别记录。
 - `default`/null 需要目标 App 新会话默认值的可靠来源。先确定最终所选 model，再取得该 model 的原生默认 effort；角色显式 model、effort=default 时，不能套用 App 默认模型或 Dispatcher 当前模型的 effort。配置文件顶层值、父会话实际值和参数回显都不足以单独证明默认选择。无可靠来源即报告 capability gap，保持未创建；用户已配置显式角色 model/effort 时按显式值执行。
-- CCD 当前没有确认可用的原生独立会话 create 工具。缺口未补齐时将 create 标为 unavailable，明确停止自动创建；深链接、手工粘贴与 CLI 不能冒充原生创建成功。
+- 宿主未开放原生独立会话创建工具时将 create 标为 unavailable，明确停止自动创建；深链接、手工粘贴与 CLI 不能冒充原生创建成功。CCD 的创建流程见第 5 节。
 
 ### 首次创建的绑定握手
 
@@ -17,6 +17,8 @@
 父会话完成原生核验并成功写入 created 回执后，才用 `bin/lead-reload ABS_TASK --session OWN_ID` 核验正式绑定并继续对应角色流程。回执仍待验证时停在握手等待阶段；其他未知绑定直接报告缺失。提示词中的角色声明或 unknown-binding 都不授予主控或委派权限。
 
 ## 2. 准备一次操作
+
+`app-session` 默认返回对应请求或绑定；register/release/claim 返回归属摘要。需要操作后的完整状态时加 `--full`（仅当前 Dispatcher 可读；release 在释放前核验身份），只读全量查询用 `show`。
 
 在工作区运行 `bin/app-session prepare --session ID --operation create|executor|read|wait|followup --task ABS_TASK`，stdin 提供该操作 JSON。新任务与已有任务可分别用 `bin/new-task SLUG --session ID --app-params JSON < card.md`、`bin/spawn-lead ABS_TASK --session ID --app-params JSON` 取得 create 请求；两者自身不创建 App 聊天。
 
@@ -51,13 +53,18 @@ bin/codex-session-evidence --session EXECUTOR_ID --kind executor \
 
 即使子代理日志带父历史，也只接受精确子代理当前 turn；不能从 helper 将要验证的日志反向挑选 turn，也不能使用父 turn。子代理须真实在任务 workdir 执行授权动作。created 回执另含 native=true、parent_session=LEAD_ID，以及 evidence.native、evidence.parent_session。Executor 的原生来源与父绑定由 helper 检查；fork 会话不能作为独立 Lead。
 
-## 5. CCD 模型与原生 Executor
+## 5. CCD 创建 Lead、模型与原生 Executor
 
 - Dispatcher 的模型由用户在 CCD 中用 `/model` 手动选择，不读 roles.toml。
-- Lead 先起 session，再切到 `bin/models resolve ROLE --entry app.ccd` 解析出的原生 ID。会话不能改自己的模型，由用户 `/model` 或其他会话切换。核对以 Lead 实际轮次的 model 为准。
+- 创建 Lead 分三步，因为 `start_session` 的 model 参数和 preset 模型都不生效，新会话继承调用方模型：
+  1. `start_session`（initiation=user_asked、context=fresh、cwd=request.task、use_worktree=false）发占位轮：只回复一行，不调用工具。
+  2. `set_session_model` 与 `set_session_effort` 设为 request.effective_request，再用 `get_session` 读回。会话不能改自己的模型。
+  3. 占位轮结束后，用 `SendMessage` 发 request.prompt 作为正式首轮，并附握手要求：`pwd`、首个授权动作各执行一次，不运行 lead-reload，等待 created 回执。
+- created 回执只引用正式首轮。占位轮跑在调用方模型上，它的 turn 不能作为 executed 或 model 证据。用 `bin/ccd-session-evidence --session LOCAL_ID --prompt-id PROMPT_ID --workspace ABS_WORKSPACE` 读取指定单轮的 model、effort、transcript 行号和快照哈希；不隐式选择最新轮，也不列举全会话。prompt ID 必须由宿主独立读取。`--agent AGENT_ID` 是另一种整份子代理日志模式，要求设置一致，不能冒充单轮证据。`--cwd` 只核对 stdout 首行，实际工具动作仍须原生观察。`--gateway` 仅在 prompt 模式提供从该轮 user 时间到下一 prompt（没有则到采集时刻）的半开窗口统计：包含并发会话，不证明归属或请求总量；有活跃 WAL/journal 时拒绝读取。
+- wait 只能靠 `<side-sessions-event>` 唤醒，没有游标和超时；它在所有已启动子会话都空闲后才触发，有任一子会话在工作，通知就会推迟。
 - Executor 角色的 model/effort 写在 `roles.ROLE.app.ccd`，填完整原生 ID。`bin/models` 据此生成 `.claude/agents/agenthelm-ROLE.md`，frontmatter 固定 model 与 effort；未配置的字段写 inherit 或省略，沿用所属 Lead 的实际值，不回落 `app.defaults.ccd`。
 - CCD 只在会话启动时加载 agent 文件。已验证 Lead 项目目录为任务目录时能加载工作区根 `.claude/agents/`；委派前仍确认 Agent 工具的可用列表含 request.subagent_type。改 roles.toml 后先运行 `bin/models`，再重启 Lead；文件缺失或过期时 `run-executor` 拒绝生成请求。
-- 委派用 Agent 工具的 `subagent_type=request.subagent_type`，不传 model。Agent 的 model 别名由 CCD 映射，不代表实际模型，不用于按角色指定。
+- 委派用 Agent 工具的 `subagent_type=request.subagent_type`，不传 model，并显式传 `effort=request.effective_request.effort`：frontmatter 的 effort 在调用省略时可能不生效，实测落到 low。Agent 的 model 别名由 CCD 映射，不代表实际模型，不用于按角色指定。
 - 回执 model/effort 填子代理 transcript 读回的 `requestedModel` 与 `effort`，须与 request.effective_request 完全相等；另填 `served_model` 为 `message.model` 及其 evidence，须等于去掉 `[1m]` 后的请求 model。Executor 角色配置可带 `[1m]` 开启 1M 上下文，对应的 model/effort 组合须先由 Dispatcher 登记进能力。
 - transcript 在 Lead 项目目录的 `<lead-session>/subagents/agent-<agentId>.jsonl`。其 `cwd` 字段是会话项目目录，cwd 证据取子代理在任务目录执行的 `pwd` 输出。
 

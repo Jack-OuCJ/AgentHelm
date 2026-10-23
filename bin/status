@@ -6,12 +6,14 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from _workspace import ROOT, owned, task_directory
+from _workspace import ROOT, owned, task_directory, write
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('state', choices=('needs-input', 'running', 'done', 'blocked'))
 parser.add_argument('description', nargs='?', default='')
 parser.add_argument('cost', nargs='?', default='')
+parser.add_argument('--no-sync', action='store_true',
+                    help='skip the board mirror and mark the task pending; retry later with bin/board-sync')
 args = parser.parse_args()
 task = Path.cwd().resolve()
 while task != ROOT and task.parent != ROOT / 'experiments':
@@ -30,8 +32,14 @@ try:
     os.replace(temporary, status)
 finally:
     Path(temporary).unlink(missing_ok=True)
+if args.no_sync:
+    write(owned(task / '.feishu-pending'), 'skipped by bin/status --no-sync\n')
 subprocess.run([str(ROOT / 'bin/board')], check=True)
 subprocess.run([str(ROOT / 'bin/kb'), 'index'], check=True)
+if args.no_sync:
+    print('status: board sync skipped; local update succeeded. Run bin/board-sync <task-dir> when allowed.',
+          file=sys.stderr)
+    sys.exit(0)
 sync = subprocess.run([str(ROOT / 'bin/board-sync'), str(task)])
 if sync.returncode:
     print('status: board sync pending; local update succeeded. Retry bin/board-sync <task-dir>.', file=sys.stderr)

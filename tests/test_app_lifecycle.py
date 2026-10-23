@@ -105,9 +105,10 @@ class AppLifecycleTests(unittest.TestCase):
             self.app('register', '--entry', 'app.codex', '--session', identifier, ok=False)
         self.app('claim', '--session', 'foreign', '--entry', 'app.codex', ok=False)
         self.app('claim', '--session', 'dispatch-2', '--entry', 'app.ccd', ok=False)
-        claimed = self.app('claim', '--session', 'dispatch-2', '--entry', 'app.codex')
-        self.assertEqual(claimed['dispatcher'], {'session': 'dispatch-2', 'entry': 'app.codex'})
-        self.assertEqual(claimed['owner_epoch'], 2)
+        summary = self.app('claim', '--session', 'dispatch-2', '--entry', 'app.codex')
+        self.assertEqual(summary, {'owner_epoch': 2, 'dispatcher': {'session': 'dispatch-2', 'entry': 'app.codex'},
+                                   'session': {'entry': 'app.codex', 'capabilities': {}}})
+        claimed = self.app('show', '--session', 'dispatch-2')
         self.assertEqual(claimed['tasks'][str(self.task)]['session'], 'lead-1')
         self.assertIn('lead-1', claimed['sessions'])
         self.receive(pending, {}, ok=False)

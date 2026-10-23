@@ -5,7 +5,16 @@ import json
 import sys
 
 from _app_requests import prepare, result
-from _app_sessions import claim, finish, record_capabilities, register, release, resume, show, transaction
+from _app_sessions import claim, finish, record_capabilities, register, release, require_dispatcher, resume, show, transaction
+
+
+def ownership(state, identifier):
+    """Summarize who owns the workspace after an ownership change; `show` prints the full state."""
+    summary = {'owner_epoch': state['owner_epoch'], 'dispatcher': state['dispatcher'],
+               'session': state['sessions'].get(identifier)}
+    if state.get('handoff'):
+        summary['handoff'] = state['handoff']
+    return summary
 
 
 def main():
@@ -36,11 +45,15 @@ def main():
     resuming.add_argument('--session', required=True)
     resuming.add_argument('--task', required=True)
     resuming.add_argument('--reason', required=True)
+    for subparser in commands.choices.values():
+        subparser.add_argument('--full', action='store_true', help='return the full workspace state after this operation')
     args = parser.parse_args()
     payload = json.load(sys.stdin) if args.command in ('prepare', 'result', 'capabilities') else None
     with transaction(readonly=args.command == 'show') as state:
+        if args.full and args.command not in ('register', 'claim'):
+            require_dispatcher(state, args.session)
         if args.command == 'register':
-            output = register(state, args.session, args.entry)
+            output = ownership(register(state, args.session, args.entry), args.session)
         elif args.command == 'capabilities':
             output = record_capabilities(state, args.session, payload)
         elif args.command == 'prepare':
@@ -48,15 +61,17 @@ def main():
         elif args.command == 'result':
             output = result(state, args.session, args.request, payload)
         elif args.command == 'release':
-            output = release(state, args.session, args.to)
+            output = ownership(release(state, args.session, args.to), args.session)
         elif args.command == 'claim':
-            output = claim(state, args.session, args.entry)
+            output = ownership(claim(state, args.session, args.entry), args.session)
         elif args.command == 'finish':
             output = finish(state, args.session, args.task)
         elif args.command == 'resume':
             output = resume(state, args.session, args.task, args.reason)
         else:
             output = show(state, args.session)
+        if args.full:
+            output = state
     print(json.dumps(output, ensure_ascii=False))
 
 
