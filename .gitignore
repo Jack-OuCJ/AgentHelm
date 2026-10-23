@@ -16,6 +16,7 @@ EXPERIMENTS.md
 
 # Local workspace configuration and generated runtime files
 .agenthelm/
+/.worktrees/
 .claude/
 .scratch/
 claudedocs/

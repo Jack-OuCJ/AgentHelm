@@ -46,7 +46,7 @@ class WorkspaceTests(unittest.TestCase):
         self.root = self.base / 'workspace'
         # Real project memory, evidence packages and pre-migration archives stay out of fixtures.
         shutil.copytree(SOURCE, self.root, ignore=shutil.ignore_patterns(
-            '.git', '.agenthelm', '.agents', '.claude', 'skills-library', '__pycache__', 'experiments',
+            '.git', '.agenthelm', '.worktrees', '.agents', '.claude', 'skills-library', '__pycache__', 'experiments',
             'cards', 'reports', 'rules', 'INDEX.md', 'BOARD.md', 'EXPERIMENTS.md', 'rules-extra.md',
             'memory', 'evidence', 'claudedocs'))
         self.home = self.base / 'home'
@@ -86,6 +86,33 @@ class WorkspaceTests(unittest.TestCase):
         else:
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
+
+    def test_worktree_policy_is_generated_and_local_directories_are_ignored(self):
+        template = (self.root / 'templates/workspace-AGENTS.md').read_text()
+        self.assertEqual((self.root / 'AGENTS.md').read_text(), template)
+        self.assertIn('主检出根目录的 `.worktrees/<name>`', template)
+        self.assertIn('现存目录不迁移', template)
+        subprocess.run(['git', 'init', str(self.root)], env=self.env, capture_output=True, check=True)
+        for relative in ('.worktrees/example/file', '.agenthelm/state/file'):
+            result = subprocess.run(['git', 'check-ignore', relative], cwd=self.root, env=self.env,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), relative)
+
+    def test_fixture_excludes_nested_worktrees(self):
+        from unittest.mock import patch
+        nested = self.root / '.worktrees/example'
+        nested.mkdir(parents=True)
+        (nested / 'sentinel').write_text('must not enter the fixture')
+        child = WorkspaceTests()
+        try:
+            with patch(__name__ + '.SOURCE', self.root):
+                child.setUp()
+            self.assertFalse((child.root / '.worktrees').exists())
+            self.assertTrue((child.root / 'bin/kb').is_file())
+            child.tearDown()
+        finally:
+            child.doCleanups()
 
     def test_deploy_idempotent_and_project_hooks_preserved(self):
         settings = self.root / '.claude/settings.json'
